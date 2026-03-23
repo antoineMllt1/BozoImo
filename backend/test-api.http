@@ -1,0 +1,66 @@
+### Route racine
+GET http://localhost:5000/
+
+###
+
+### Documentation API
+GET http://localhost:5000/api
+
+###
+
+### Test de santé de l'API
+GET http://localhost:5000/api/immobilier/health
+
+###
+
+### Géocoder une adresse
+POST http://localhost:5000/api/immobilier/geocode
+Content-Type: application/json
+
+{
+  "address": "19 rue du paradis Paris"
+}
+
+###
+
+### Géocoder avec numéro de rue
+POST http://localhost:5000/api/immobilier/geocode
+Content-Type: application/json
+
+{
+  "address": "10 rue du paradis Paris"
+}
+
+###
+
+### Recherche avec une seule chambre
+POST http://localhost:5000/api/immobilier/search
+Content-Type: application/json
+
+{
+  "bounds": [48.8723446578436, 2.3523596230005523, 48.876917237640924, 2.3562863769984403],
+  "roomCount": 2
+}
+
+###
+
+### Recherche avec plusieurs chambres (1 à 5)
+POST http://localhost:5000/api/immobilier/search
+Content-Type: application/json
+
+{
+  "bounds": [48.8723446578436, 2.3523596230005523, 48.876917237640924, 2.3562863769984403],
+  "roomCount": [1, 2, 3, 4, 5]
+}
+
+###
+
+### Recherche avec seulement 1 et 2 chambres
+POST http://localhost:5000/api/immobilier/search
+Content-Type: application/json
+
+{
+  "bounds": [48.8723446578436, 2.3523596230005523, 48.876917237640924, 2.3562863769984403],
+  "roomCount": [1, 2]
+}
+
