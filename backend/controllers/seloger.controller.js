@@ -69,7 +69,7 @@ async function searchByPlaceId(placeId, filters = {}) {
     },
     paging: {
       page: 1,
-      size: 30,
+      size: filters.size || 30,
       order: "Default"
     }
   };
@@ -120,7 +120,7 @@ async function searchByPolyline(polyline, filters = {}) {
     },
     paging: {
       page: 1,
-      size: 30,
+      size: filters.size || 30,
       order: "Default"
     }
   };
@@ -306,6 +306,7 @@ exports.countSeloger = async (req, res) => {
 exports.searchSeloger = async (req, res) => {
   try {
     const { address, filters = {} } = req.body;
+    const searchSize = filters.size || 30;
 
     // Validation du paramètre
     if (!address || typeof address !== 'string') {
@@ -314,7 +315,7 @@ exports.searchSeloger = async (req, res) => {
       });
     }
 
-    console.log(`🔍 Recherche pour : ${address}`);
+    console.log(`🔍 Recherche pour : ${address} (${searchSize} annonces)`);
 
     // Étape 1 : Récupérer les données de localisation
     console.log('📍 Récupération des coordonnées et de l\'ID...');
@@ -338,15 +339,15 @@ exports.searchSeloger = async (req, res) => {
 
     console.log(`📊 Résultats trouvés avec l'ID : ${totalCount}`);
 
-    // Étape 3 : Si moins de 30 résultats, recherche par cercles croissants
-    if (totalCount < 30) {
-      console.log('⚠️  Moins de 30 résultats, recherche par cercles croissants...');
-      
+    // Étape 3 : Si moins de searchSize résultats, recherche par cercles croissants
+    if (totalCount < searchSize) {
+      console.log(`⚠️  Moins de ${searchSize} résultats, recherche par cercles croissants...`);
+
       let radius = 100; // Commence à 100 mètres
       const maxRadius = 5000; // Maximum 5km
       const radiusIncrement = 100; // Augmente de 100m à chaque fois
-      
-      while (totalCount < 30 && radius <= maxRadius) {
+
+      while (totalCount < searchSize && radius <= maxRadius) {
         console.log(`🔄 Tentative avec un rayon de ${radius}m...`);
         
         // Créer un polyline circulaire
@@ -359,8 +360,8 @@ exports.searchSeloger = async (req, res) => {
         
         console.log(`📊 Résultats avec ${radius}m : ${totalCount}`);
         
-        if (totalCount >= 30) {
-          console.log(`✅ Au moins 30 résultats trouvés avec un rayon de ${radius}m`);
+        if (totalCount >= searchSize) {
+          console.log(`✅ Au moins ${searchSize} résultats trouvés avec un rayon de ${radius}m`);
           break;
         }
         
@@ -368,7 +369,7 @@ exports.searchSeloger = async (req, res) => {
         radius += radiusIncrement;
       }
       
-      if (totalCount < 30) {
+      if (totalCount < searchSize) {
         console.log(`⚠️  Seulement ${totalCount} résultats trouvés même avec le rayon maximum (${maxRadius}m)`);
       }
     }

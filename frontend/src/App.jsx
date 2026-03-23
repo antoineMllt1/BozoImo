@@ -1,1216 +1,704 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import './App.css';
 
-function App() {
-  const [dataSource, setDataSource] = useState('seloger'); // 'seloger' ou 'meilleursagents'
-  const [address, setAddress] = useState('');
-  
-  const [formData, setFormData] = useState({
-    lat1: '',
-    lng1: '',
-    lat2: '',
-    lng2: '',
-    roomCount: [],
-    itemTypes: ['ITEM_TYPE.HOUSE', 'ITEM_TYPE.APARTMENT'],
-    priceMin: 0,
-    priceMax: 2000000,
-    areaMin: 0,
-    areaMax: 300
-  });
-  
-  // Filtres SeLoger
-  const [selogerFilters, setSelogerFilters] = useState({
-    estateTypes: ['House', 'Apartment'],
-    numberOfRoomsMin: '',
-    numberOfRoomsMax: '',
-    priceMin: '',
-    priceMax: '',
-    spaceMin: '',
-    spaceMax: '',
-    featuresIncluded: []
-  });
-  
-  const [loading, setLoading] = useState(false);
-  const [counting, setCounting] = useState(false);
-  const [resultCount, setResultCount] = useState(null);
-  const [results, setResults] = useState(null);
-  const [error, setError] = useState(null);
-  const [showFilters, setShowFilters] = useState(false);
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-  const roomOptions = [1, 2, 3, 4, 5];
-  const itemTypeOptions = [
-    { value: 'ITEM_TYPE.HOUSE', label: 'Maison', icon: '🏠' },
-    { value: 'ITEM_TYPE.APARTMENT', label: 'Appartement', icon: '🏢' }
-  ];
+const SELOGER_FEATURES = [
+  { value: 'Parking_Garage',         label: 'Parking',         icon: '🅿️' },
+  { value: 'Balcony_Terrace',        label: 'Balcon',          icon: '🌿' },
+  { value: 'Garden',                 label: 'Jardin',          icon: '🌳' },
+  { value: 'Swimming_Pool',          label: 'Piscine',         icon: '🏊' },
+  { value: 'Cellar',                 label: 'Cave',            icon: '📦' },
+  { value: 'Kitchen_Fully_Equipped', label: 'Cuisine équipée', icon: '🍳' },
+  { value: 'Exclusive',              label: 'Exclusivité',     icon: '⭐' },
+];
 
-  // Options pour SeLoger
-  const selogerEstateTypes = [
-    { value: 'House', label: 'Maison', icon: '🏠' },
-    { value: 'Apartment', label: 'Appartement', icon: '🏢' }
-  ];
+const SELOGER_ESTATE_TYPES = [
+  { value: 'House',     label: 'Maison',      icon: '🏠' },
+  { value: 'Apartment', label: 'Appartement', icon: '🏢' },
+];
 
-  const selogerFeatures = [
-    { value: 'Parking_Garage', label: 'Parking/Garage', icon: '🚗' },
-    { value: 'Balcony_Terrace', label: 'Balcon/Terrasse', icon: '🌿' },
-    { value: 'Garden', label: 'Jardin', icon: '🌳' },
-    { value: 'Swimming_Pool', label: 'Piscine', icon: '🏊' },
-    { value: 'Cellar', label: 'Cave', icon: '📦' },
-    { value: 'Kitchen_Fully_Equipped', label: 'Cuisine équipée', icon: '🍳' },
-    { value: 'Exclusive', label: 'Exclusivité', icon: '⭐' }
-  ];
+const MA_ITEM_TYPES = [
+  { value: 'ITEM_TYPE.HOUSE',     label: 'Maison',      icon: '🏠' },
+  { value: 'ITEM_TYPE.APARTMENT', label: 'Appartement', icon: '🏢' },
+];
 
-  const handleRoomToggle = (room) => {
-    setFormData(prev => {
-      const currentRooms = prev.roomCount;
-      if (currentRooms.includes(room)) {
-        return { ...prev, roomCount: currentRooms.filter(r => r !== room) };
-      } else {
-        return { ...prev, roomCount: [...currentRooms, room].sort() };
-      }
-    });
-  };
+const DEFAULT_SELOGER = {
+  estateTypes: ['House', 'Apartment'],
+  numberOfRoomsMin: '', numberOfRoomsMax: '',
+  priceMin: '', priceMax: '',
+  spaceMin: '', spaceMax: '',
+  featuresIncluded: [],
+};
 
-  const handleItemTypeToggle = (type) => {
-    setFormData(prev => {
-      const currentTypes = prev.itemTypes;
-      if (currentTypes.includes(type)) {
-        if (currentTypes.length === 1) return prev;
-        return { ...prev, itemTypes: currentTypes.filter(t => t !== type) };
-      } else {
-        return { ...prev, itemTypes: [...currentTypes, type] };
-      }
-    });
-  };
+const DEFAULT_MA = {
+  roomCount: [],
+  itemTypes: ['ITEM_TYPE.HOUSE', 'ITEM_TYPE.APARTMENT'],
+  priceMin: '', priceMax: '',
+  areaMin: '', areaMax: '',
+};
 
-  const handlePriceChange = (minOrMax, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [minOrMax]: parseInt(value)
-    }));
-  };
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-  const handleAreaChange = (minOrMax, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [minOrMax]: parseInt(value)
-    }));
-  };
+const isoToday = () => new Date().toISOString().slice(0, 10);
 
-  const formatPrice = (price) => {
-    if (price >= 1000000) {
-      return `${(price / 1000000).toFixed(1)}M€`;
-    } else if (price >= 1000) {
-      return `${(price / 1000).toFixed(0)}k€`;
-    }
-    return `${price}€`;
-  };
+const extractKf = (kf, kw) =>
+  kf.find(f => f.includes(kw))?.replace(new RegExp(` ?${kw}s?`), '') || '';
 
-  const countActiveFilters = () => {
-    let count = 0;
-    if (formData.roomCount.length > 0) count += formData.roomCount.length;
-    if (formData.priceMin > 0) count++;
-    if (formData.priceMax < 2000000) count++;
-    if (formData.areaMin > 0) count++;
-    if (formData.areaMax < 300) count++;
-    return count;
-  };
+// ─── App ──────────────────────────────────────────────────────────────────────
 
-  const countActiveSelogerFilters = () => {
-    let count = 0;
-    if (selogerFilters.estateTypes.length < 2) count++;
-    if (selogerFilters.numberOfRoomsMin !== '' || selogerFilters.numberOfRoomsMax !== '') count++;
-    if (selogerFilters.priceMin !== '' || selogerFilters.priceMax !== '') count++;
-    if (selogerFilters.spaceMin !== '' || selogerFilters.spaceMax !== '') count++;
-    if (selogerFilters.featuresIncluded.length > 0) count += selogerFilters.featuresIncluded.length;
-    return count;
-  };
+export default function App() {
+  const [dataSource,     setDataSource]     = useState('seloger');
+  const [address,        setAddress]        = useState('');
+  const [selogerFilters, setSelogerFilters] = useState(DEFAULT_SELOGER);
+  const [maFilters,      setMaFilters]      = useState(DEFAULT_MA);
+  const [pageSize,       setPageSize]       = useState(30);
 
-  // Fonction de comptage des résultats SeLoger
-  const handleCountResults = async () => {
-    if (!address || address.length < 2) {
-      setResultCount(null);
-      return;
-    }
-    
-    setCounting(true);
-    try {
-      // Nettoyer les filtres (enlever les valeurs vides)
-      const cleanFilters = {};
-      if (selogerFilters.estateTypes.length > 0) cleanFilters.estateTypes = selogerFilters.estateTypes;
-      if (selogerFilters.numberOfRoomsMin !== '') cleanFilters.numberOfRoomsMin = parseInt(selogerFilters.numberOfRoomsMin);
-      if (selogerFilters.numberOfRoomsMax !== '') cleanFilters.numberOfRoomsMax = parseInt(selogerFilters.numberOfRoomsMax);
-      if (selogerFilters.priceMin !== '') cleanFilters.priceMin = parseInt(selogerFilters.priceMin);
-      if (selogerFilters.priceMax !== '') cleanFilters.priceMax = parseInt(selogerFilters.priceMax);
-      if (selogerFilters.spaceMin !== '') cleanFilters.spaceMin = parseInt(selogerFilters.spaceMin);
-      if (selogerFilters.spaceMax !== '') cleanFilters.spaceMax = parseInt(selogerFilters.spaceMax);
-      if (selogerFilters.featuresIncluded.length > 0) cleanFilters.featuresIncluded = selogerFilters.featuresIncluded;
-      
-      const response = await fetch('http://localhost:5000/api/seloger/count', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          address: address,
-          filters: cleanFilters
-        })
-      });
-      
-      const data = await response.json();
-      setResultCount(data.count?.totalCount || data.count || 0);
-    } catch (err) {
-      console.error('Erreur comptage:', err);
-      setResultCount(null);
-    } finally {
-      setCounting(false);
-    }
-  };
+  const [results,        setResults]        = useState(null);
+  const [loading,        setLoading]        = useState(false);
+  const [error,          setError]          = useState(null);
+  const [searchedAddr,   setSearchedAddr]   = useState('');
 
-  // Déclencher le comptage automatiquement
+  const [counting,       setCounting]       = useState(false);
+  const [resultCount,    setResultCount]    = useState(null);
+  const [showFilters,    setShowFilters]    = useState(false);
+  const [recentSearches, setRecentSearches] = useState([]);
+  const [showRecent,     setShowRecent]     = useState(false);
+
+  const inputRef  = useRef(null);
+  const resultsRef = useRef(null);
+
+  // Persist recent searches
   useEffect(() => {
-    if (dataSource === 'seloger' && address.length >= 2) {
-      const timer = setTimeout(() => {
-        handleCountResults();
-      }, 500); // Debounce 500ms
-      
-      return () => clearTimeout(timer);
-    } else {
-      setResultCount(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [address, selogerFilters, dataSource]);
+    try {
+      const s = localStorage.getItem('estimia_recent');
+      if (s) setRecentSearches(JSON.parse(s));
+    } catch { /* ignore */ }
+  }, []);
 
-  // Export SeLoger en CSV
-  const exportSelogerToCSV = () => {
-    if (!results || !results.classifieds || results.classifieds.length === 0) return;
-
-    const headers = ['#', 'Type', 'Prix', '€/m²', 'Pièces', 'Chambres', 'Surface', 'Ville', 'Code Postal', 'Quartier', 'Agence', 'Note', 'URL'];
-    
-    const rows = results.classifieds.map((classified, index) => {
-      const keyfacts = classified.hardFacts?.keyfacts || [];
-      const rooms = keyfacts.find(f => f.includes('pièce'))?.replace(' pièces', '') || '';
-      const bedrooms = keyfacts.find(f => f.includes('chambre'))?.replace(' chambres', '').replace(' chambre', '') || '';
-      const surface = keyfacts.find(f => f.includes('m²'))?.replace(' m²', '') || '';
-      
-      return [
-        index + 1,
-        classified.hardFacts?.title || '',
-        `"${classified.hardFacts?.price?.value || ''}"`,
-        classified.hardFacts?.price?.additionalInformation || '',
-        rooms,
-        bedrooms,
-        surface,
-        classified.location?.address?.city || '',
-        classified.location?.address?.zipCode || '',
-        classified.location?.address?.district || '',
-        `"${classified.provider?.intermediaryCard?.title || ''}"`,
-        classified.provider?.rating?.rating || '',
-        `"${classified.url || ''}"`
-      ].join(',');
-    });
-
-    const csvContent = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    
-    link.setAttribute('href', url);
-    link.setAttribute('download', `seloger_${address}_${new Date().toISOString().slice(0, 10)}.csv`);
-    link.style.visibility = 'hidden';
-    
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const saveRecent = (addr) => {
+    const updated = [addr, ...recentSearches.filter(r => r !== addr)].slice(0, 8);
+    setRecentSearches(updated);
+    try { localStorage.setItem('estimia_recent', JSON.stringify(updated)); } catch { /* ignore */ }
   };
 
-  // Export MeilleursAgents en CSV
-  const exportMeilleursAgentsToCSV = () => {
-    if (!results || !results.features || results.features.length === 0) return;
-
-    const headers = ['#', 'Adresse', 'Type', 'Surface (m²)', 'Prix', 'Prix actualisé', '€/m²', 'Date'];
-    
-    const rows = results.features.map((feature, index) => {
-      const props = feature.properties;
-      const pricePerSqm = props.area > 0 ? Math.round(props.updated_price / props.area) : 0;
-      
-      return [
-        index + 1,
-        `"${props.address_name}"`,
-        props.room_count,
-        props.area,
-        `"${props.price}"`,
-        props.updated_price,
-        pricePerSqm,
-        `"${props.sale_at}"`
-      ].join(',');
-    });
-
-    const csvContent = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    
-    link.setAttribute('href', url);
-    link.setAttribute('download', `meilleursagents_${new Date().toISOString().slice(0, 10)}.csv`);
-    link.style.visibility = 'hidden';
-    
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  // Build SeLoger filters object
+  const buildSelogerFilters = () => {
+    const c = { size: pageSize };
+    if (selogerFilters.estateTypes.length)       c.estateTypes       = selogerFilters.estateTypes;
+    if (selogerFilters.numberOfRoomsMin !== '')   c.numberOfRoomsMin  = +selogerFilters.numberOfRoomsMin;
+    if (selogerFilters.numberOfRoomsMax !== '')   c.numberOfRoomsMax  = +selogerFilters.numberOfRoomsMax;
+    if (selogerFilters.priceMin !== '')           c.priceMin          = +selogerFilters.priceMin;
+    if (selogerFilters.priceMax !== '')           c.priceMax          = +selogerFilters.priceMax;
+    if (selogerFilters.spaceMin !== '')           c.spaceMin          = +selogerFilters.spaceMin;
+    if (selogerFilters.spaceMax !== '')           c.spaceMax          = +selogerFilters.spaceMax;
+    if (selogerFilters.featuresIncluded.length)   c.featuresIncluded  = selogerFilters.featuresIncluded;
+    return c;
   };
 
-  // Export Excel
-  const exportToExcel = () => {
-    if (dataSource === 'seloger') {
-      exportSelogerToExcel();
-    } else {
-      exportMeilleursAgentsToExcel();
-    }
-  };
+  // Live count (SeLoger only)
+  useEffect(() => {
+    if (dataSource !== 'seloger' || address.length < 2) { setResultCount(null); return; }
+    const t = setTimeout(async () => {
+      setCounting(true);
+      try {
+        const r = await fetch('/api/seloger/count', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ address, filters: buildSelogerFilters() }),
+        });
+        const d = await r.json();
+        setResultCount(d.count?.totalCount ?? d.count ?? 0);
+      } catch { setResultCount(null); }
+      finally   { setCounting(false); }
+    }, 500);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [address, selogerFilters, pageSize, dataSource]);
 
-  const exportSelogerToExcel = () => {
-    if (!results || !results.classifieds || results.classifieds.length === 0) return;
-
-    const headers = ['#', 'Type', 'Prix', '€/m²', 'Pièces', 'Chambres', 'Surface', 'Ville', 'Code Postal', 'Quartier', 'Agence', 'Note', 'URL'];
-    
-    const rows = results.classifieds.map((classified, index) => {
-      const keyfacts = classified.hardFacts?.keyfacts || [];
-      const rooms = keyfacts.find(f => f.includes('pièce'))?.replace(' pièces', '') || '';
-      const bedrooms = keyfacts.find(f => f.includes('chambre'))?.replace(' chambres', '').replace(' chambre', '') || '';
-      const surface = keyfacts.find(f => f.includes('m²'))?.replace(' m²', '') || '';
-      
-      return [
-        index + 1,
-        classified.hardFacts?.title || '',
-        classified.hardFacts?.price?.value || '',
-        classified.hardFacts?.price?.additionalInformation || '',
-        rooms,
-        bedrooms,
-        surface,
-        classified.location?.address?.city || '',
-        classified.location?.address?.zipCode || '',
-        classified.location?.address?.district || '',
-        classified.provider?.intermediaryCard?.title || '',
-        classified.provider?.rating?.rating || '',
-        classified.url || ''
-      ].join('\t');
-    });
-
-    const content = [headers.join('\t'), ...rows].join('\n');
-    const blob = new Blob(['\uFEFF' + content], { type: 'application/vnd.ms-excel;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    
-    link.setAttribute('href', url);
-    link.setAttribute('download', `seloger_${address}_${new Date().toISOString().slice(0, 10)}.xls`);
-    link.style.visibility = 'hidden';
-    
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const exportMeilleursAgentsToExcel = () => {
-    if (!results || !results.features || results.features.length === 0) return;
-
-    const headers = ['#', 'Adresse', 'Type', 'Surface (m²)', 'Prix', 'Prix actualisé (€)', '€/m²', 'Date', 'Ville', 'Code Postal'];
-    
-    const rows = results.features.map((feature, index) => {
-      const props = feature.properties;
-      const pricePerSqm = props.area > 0 ? Math.round(props.updated_price / props.area) : 0;
-      
-      return [
-        index + 1,
-        props.address_name,
-        props.room_count,
-        props.area,
-        props.price,
-        props.updated_price,
-        pricePerSqm,
-        props.sale_at,
-        props.city_name,
-        props.zip
-      ].join('\t');
-    });
-
-    const content = [
-      headers.join('\t'),
-      ...rows,
-      '',
-      'Statistiques',
-      `Prix moyen/m²\t${Math.round(results.features.reduce((sum, f) => sum + (f.properties.updated_price / f.properties.area), 0) / results.features.length)} €`,
-      `Prix moyen\t${Math.round(results.features.reduce((sum, f) => sum + f.properties.updated_price, 0) / results.features.length).toLocaleString('fr-FR')} €`,
-      `Surface moyenne\t${Math.round(results.features.reduce((sum, f) => sum + f.properties.area, 0) / results.features.length)} m²`
-    ].join('\n');
-
-    const blob = new Blob(['\uFEFF' + content], { type: 'application/vnd.ms-excel;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    
-    link.setAttribute('href', url);
-    link.setAttribute('download', `meilleursagents_${new Date().toISOString().slice(0, 10)}.xls`);
-    link.style.visibility = 'hidden';
-    
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
+  // Submit search
   const handleSubmit = async (e) => {
-    e.preventDefault();
+    e?.preventDefault();
+    if (!address.trim() || loading) return;
     setLoading(true);
     setError(null);
     setResults(null);
+    setShowRecent(false);
+    setSearchedAddr(address.trim());
+    saveRecent(address.trim());
 
     try {
       if (dataSource === 'seloger') {
-        // Recherche SeLoger avec filtres nettoyés
-        const cleanFilters = {};
-        if (selogerFilters.estateTypes.length > 0) cleanFilters.estateTypes = selogerFilters.estateTypes;
-        if (selogerFilters.numberOfRoomsMin !== '') cleanFilters.numberOfRoomsMin = parseInt(selogerFilters.numberOfRoomsMin);
-        if (selogerFilters.numberOfRoomsMax !== '') cleanFilters.numberOfRoomsMax = parseInt(selogerFilters.numberOfRoomsMax);
-        if (selogerFilters.priceMin !== '') cleanFilters.priceMin = parseInt(selogerFilters.priceMin);
-        if (selogerFilters.priceMax !== '') cleanFilters.priceMax = parseInt(selogerFilters.priceMax);
-        if (selogerFilters.spaceMin !== '') cleanFilters.spaceMin = parseInt(selogerFilters.spaceMin);
-        if (selogerFilters.spaceMax !== '') cleanFilters.spaceMax = parseInt(selogerFilters.spaceMax);
-        if (selogerFilters.featuresIncluded.length > 0) cleanFilters.featuresIncluded = selogerFilters.featuresIncluded;
-        
-        const response = await fetch('http://localhost:5000/api/seloger/search', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ 
-            address: address,
-            filters: cleanFilters
-          })
+        const res  = await fetch('/api/seloger/search', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ address, filters: buildSelogerFilters() }),
         });
-
-        const data = await response.json();
-
-        if (data.error) {
-          setError(data.error);
-        } else {
-          setResults(data);
-        }
+        const data = await res.json();
+        if (data.error) setError(data.error); else setResults(data);
       } else {
-        // Recherche MeilleursAgents - Géocodage automatique
-        try {
-          // 1. Géocoder l'adresse
-          const geocodeResponse = await fetch('http://localhost:5000/api/immobilier/geocode', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ address: address })
-          });
-
-          const geocodeData = await geocodeResponse.json();
-          
-          if (!geocodeData.response || !geocodeData.response.places || geocodeData.response.places.length === 0) {
-            setError('Adresse non trouvée');
-            return;
-          }
-
-          const place = geocodeData.response.places[0];
-          const lat = place._geoloc.lat;
-          const lng = place._geoloc.lng;
-          
-          const latOffset = 0.00236;
-          const lngOffset = 0.00196;
-          
-          const bounds = [
-            lat - latOffset,
-            lng - lngOffset,
-            lat + latOffset,
-            lng + lngOffset
-          ];
-
-          // 2. Rechercher avec les coordonnées
+        const geo  = await fetch('/api/immobilier/geocode', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ address }),
+        });
+        const gd   = await geo.json();
+        if (!gd.response?.places?.length) {
+          setError('Adresse non trouvée. Essayez un nom de ville ou de quartier.');
+        } else {
+          const { lat, lng } = gd.response.places[0]._geoloc;
+          const delta = 0.002;
           const payload = {
-            bounds,
-            roomCount: formData.roomCount,
-            itemTypes: formData.itemTypes
+            bounds: [lat - delta, lng - delta, lat + delta, lng + delta],
+            roomCount: maFilters.roomCount, itemTypes: maFilters.itemTypes,
           };
-
-          if (formData.priceMin > 0) {
-            payload.priceMin = formData.priceMin;
-          }
-          if (formData.priceMax < 2000000) {
-            payload.priceMax = formData.priceMax;
-          }
-          if (formData.areaMin > 0) {
-            payload.areaMin = formData.areaMin;
-          }
-          if (formData.areaMax < 300) {
-            payload.areaMax = formData.areaMax;
-          }
-
-          const response = await fetch('http://localhost:5000/api/immobilier/search', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(payload)
+          if (maFilters.priceMin !== '') payload.priceMin = +maFilters.priceMin;
+          if (maFilters.priceMax !== '') payload.priceMax = +maFilters.priceMax;
+          if (maFilters.areaMin  !== '') payload.areaMin  = +maFilters.areaMin;
+          if (maFilters.areaMax  !== '') payload.areaMax  = +maFilters.areaMax;
+          const res  = await fetch('/api/immobilier/search', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
           });
-
-          const data = await response.json();
-
-          if (data.success) {
-            setResults(data.data);
-          } else {
-            setError(data.error || 'Une erreur est survenue');
-          }
-        } catch (geocodeErr) {
-          setError('Erreur lors du géocodage: ' + geocodeErr.message);
+          const data = await res.json();
+          if (data.success) setResults(data.data); else setError(data.error || 'Erreur serveur');
         }
       }
     } catch (err) {
-      setError('Erreur de connexion au serveur: ' + err.message);
+      setError('Erreur de connexion : ' + err.message);
     } finally {
       setLoading(false);
+      setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
     }
   };
 
-  // Fonction pour changer de source et réinitialiser
-  const handleSourceChange = (newSource) => {
-    setDataSource(newSource);
-    setAddress('');
-    setResults(null);
-    setError(null);
-    setResultCount(null);
-    // Réinitialiser les filtres SeLoger
-    if (newSource === 'seloger') {
-      setSelogerFilters({
-        estateTypes: ['House', 'Apartment'],
-        numberOfRoomsMin: '',
-        numberOfRoomsMax: '',
-        priceMin: '',
-        priceMax: '',
-        spaceMin: '',
-        spaceMax: '',
-        featuresIncluded: []
+  // Filter helpers
+  const resetFilters = () => { setSelogerFilters(DEFAULT_SELOGER); setMaFilters(DEFAULT_MA); setPageSize(30); };
+
+  const toggleSEType = v => setSelogerFilters(p => ({
+    ...p, estateTypes: p.estateTypes.includes(v) ? p.estateTypes.filter(t => t !== v) : [...p.estateTypes, v],
+  }));
+  const toggleFeature = v => setSelogerFilters(p => ({
+    ...p, featuresIncluded: p.featuresIncluded.includes(v)
+      ? p.featuresIncluded.filter(f => f !== v) : [...p.featuresIncluded, v],
+  }));
+  const toggleMAType = v => setMaFilters(p => ({
+    ...p, itemTypes: p.itemTypes.includes(v)
+      ? p.itemTypes.length > 1 ? p.itemTypes.filter(t => t !== v) : p.itemTypes
+      : [...p.itemTypes, v],
+  }));
+  const toggleMARoom = r => setMaFilters(p => ({
+    ...p, roomCount: p.roomCount.includes(r)
+      ? p.roomCount.filter(x => x !== r) : [...p.roomCount, r].sort((a, b) => a - b),
+  }));
+
+  const countActiveFilters = () => {
+    if (dataSource === 'seloger') {
+      let n = 0;
+      if (selogerFilters.estateTypes.length < 2) n++;
+      if (selogerFilters.numberOfRoomsMin !== '' || selogerFilters.numberOfRoomsMax !== '') n++;
+      if (selogerFilters.priceMin !== '' || selogerFilters.priceMax !== '') n++;
+      if (selogerFilters.spaceMin !== '' || selogerFilters.spaceMax !== '') n++;
+      return n + selogerFilters.featuresIncluded.length;
+    }
+    let n = 0;
+    if (maFilters.itemTypes.length < 2) n++;
+    if (maFilters.roomCount.length > 0) n++;
+    if (maFilters.priceMin !== '' || maFilters.priceMax !== '') n++;
+    if (maFilters.areaMin  !== '' || maFilters.areaMax  !== '') n++;
+    return n;
+  };
+
+  const priceMin   = dataSource === 'seloger' ? selogerFilters.priceMin : maFilters.priceMin;
+  const priceMax   = dataSource === 'seloger' ? selogerFilters.priceMax : maFilters.priceMax;
+  const spaceMin   = dataSource === 'seloger' ? selogerFilters.spaceMin : maFilters.areaMin;
+  const spaceMax   = dataSource === 'seloger' ? selogerFilters.spaceMax : maFilters.areaMax;
+  const setPriceMin = v => dataSource === 'seloger' ? setSelogerFilters(p => ({ ...p, priceMin: v })) : setMaFilters(p => ({ ...p, priceMin: v }));
+  const setPriceMax = v => dataSource === 'seloger' ? setSelogerFilters(p => ({ ...p, priceMax: v })) : setMaFilters(p => ({ ...p, priceMax: v }));
+  const setSpaceMin = v => dataSource === 'seloger' ? setSelogerFilters(p => ({ ...p, spaceMin: v })) : setMaFilters(p => ({ ...p, areaMin: v }));
+  const setSpaceMax = v => dataSource === 'seloger' ? setSelogerFilters(p => ({ ...p, spaceMax: v })) : setMaFilters(p => ({ ...p, areaMax: v }));
+
+  // Export
+  const dl = (content, mime, name) => {
+    const b = new Blob(['\uFEFF' + content], { type: mime + ';charset=utf-8;' });
+    const u = URL.createObjectURL(b);
+    const a = Object.assign(document.createElement('a'), { href: u, download: name, style: 'display:none' });
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(u);
+  };
+
+  const exportData = (fmt) => {
+    const sep = fmt === 'csv' ? ',' : '\t';
+    const q   = v => fmt === 'csv' && typeof v === 'string' && v.includes(',') ? `"${v}"` : v;
+    if (dataSource === 'seloger') {
+      const list = results?.classifieds || [];
+      if (!list.length) return;
+      const H = ['#','Type','Prix','€/m²','Pièces','Chambres','Surface','Ville','CP','Quartier','Agence','Note','URL'];
+      const rows = list.map((c, i) => {
+        const kf = c.hardFacts?.keyfacts || [];
+        return [i+1, q(c.hardFacts?.title||''), q(c.hardFacts?.price?.value||''),
+          c.hardFacts?.price?.additionalInformation||'',
+          extractKf(kf,'pièce'), extractKf(kf,'chambre'), extractKf(kf,'m²'),
+          q(c.location?.address?.city||''), c.location?.address?.zipCode||'',
+          q(c.location?.address?.district||''), q(c.provider?.intermediaryCard?.title||''),
+          c.provider?.rating?.rating||'', q(c.url||'')].join(sep);
       });
+      dl([H.join(sep), ...rows].join('\n'), fmt==='csv'?'text/csv':'application/vnd.ms-excel',
+        `seloger_${searchedAddr}_${isoToday()}.${fmt==='csv'?'csv':'xls'}`);
+    } else {
+      const fs = results?.features || [];
+      if (!fs.length) return;
+      const H = ['#','Adresse','Pièces','Surface m²','Prix','Prix actualisé','€/m²','Date'];
+      const rows = fs.map((f, i) => {
+        const p = f.properties;
+        return [i+1, q(p.address_name), p.room_count, p.area, q(p.price),
+          p.updated_price, Math.round(p.updated_price/p.area), p.sale_at].join(sep);
+      });
+      dl([H.join(sep), ...rows].join('\n'), fmt==='csv'?'text/csv':'application/vnd.ms-excel',
+        `dvf_${isoToday()}.${fmt==='csv'?'csv':'xls'}`);
     }
   };
+
+  // Derived
+  const activeFilters = countActiveFilters();
+  const slList        = results?.classifieds || [];
+  const maFeats       = results?.features    || [];
+  const maAvg         = fn => maFeats.length
+    ? Math.round(maFeats.reduce((s, f) => s + fn(f.properties), 0) / maFeats.length) : 0;
 
   return (
     <div className="app">
-      <header className="header">
-        <h1>🏠 Estimia</h1>
-        <p>Antoine te fait gagner le temps qu'il t'a fait perdre</p>
+
+      {/* ── Navbar ──────────────────────────────────────────────────────────── */}
+      <header className="navbar">
+        <div className="nav-inner">
+          <a className="nav-logo" href="/" onClick={e => { e.preventDefault(); setResults(null); setError(null); setAddress(''); }}>
+            <div className="logo-mark">E</div>
+            <div className="logo-text">
+              <span className="logo-name">Estimia</span>
+              <span className="logo-tagline">Analyse du marché immobilier</span>
+            </div>
+          </a>
+
+          <nav className="source-nav">
+            <button
+              className={`src-pill${dataSource === 'seloger' ? ' active' : ''}`}
+              onClick={() => { setDataSource('seloger'); setResults(null); setError(null); }}
+            >
+              <span className="src-dot" />
+              Offres en cours
+            </button>
+            <button
+              className={`src-pill${dataSource === 'meilleursagents' ? ' active' : ''}`}
+              onClick={() => { setDataSource('meilleursagents'); setResults(null); setError(null); }}
+            >
+              <span className="src-dot" />
+              Ventes passées (DVF)
+            </button>
+          </nav>
+        </div>
       </header>
 
-      <main className="container">
-        {/* Sélecteur de source */}
-        <div className="source-selector">
-          <button
-            type="button"
-            className={`source-btn ${dataSource === 'seloger' ? 'active' : ''}`}
-            onClick={() => handleSourceChange('seloger')}
-          >
-            <div className="source-icon">🏘️</div>
-            <div className="source-info">
-              <div className="source-name">SeLoger</div>
-              <div className="source-desc">Annonces actives</div>
-            </div>
-          </button>
-          <button
-            type="button"
-            className={`source-btn ${dataSource === 'meilleursagents' ? 'active' : ''}`}
-            onClick={() => handleSourceChange('meilleursagents')}
-          >
-            <div className="source-icon">📊</div>
-            <div className="source-info">
-              <div className="source-name">MeilleursAgents</div>
-              <div className="source-desc">Historique DVF</div>
-            </div>
-          </button>
-        </div>
+      {/* ── Hero ────────────────────────────────────────────────────────────── */}
+      <section className="hero">
+        <div className="hero-inner">
+          <div className="hero-badge">
+            {dataSource === 'seloger' ? '🏘️ SeLoger — offres actives' : '📊 MeilleursAgents — données DVF'}
+          </div>
+          <h1 className="hero-title">
+            {dataSource === 'seloger'
+              ? <>Collectez les offres <em>du marché</em></>
+              : <>Analysez les ventes <em>passées</em></>}
+          </h1>
+          <p className="hero-sub">
+            {dataSource === 'seloger'
+              ? `Extrayez les annonces en cours sur une zone géographique pour analyser les prix pratiqués, les typologies de biens et les tendances du marché.`
+              : `Accédez aux transactions DVF géolocalisées pour estimer la valeur d'un bien, comparer les prix au m² et identifier les tendances de vente.`}
+          </p>
 
-        <form onSubmit={handleSubmit} className="search-form">
-          {dataSource === 'seloger' ? (
-            // Interface SeLoger - Avec compteur et filtres
-            <>
-              <div className="form-section">
-                <label className="section-label">Quartier ou Ville</label>
-                <input
-                  type="text"
-                  className="address-input"
-                  placeholder=""
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  autoComplete="off"
-                />
-              </div>
+          {/* Search bar */}
+          <form className="search-form" onSubmit={handleSubmit}>
+            <div className="search-field">
+              <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <input
+                ref={inputRef}
+                type="text"
+                className="search-input"
+                placeholder="Zone à analyser — ville, quartier, arrondissement…"
+                value={address}
+                onChange={e => { setAddress(e.target.value); setShowRecent(true); }}
+                onFocus={() => setShowRecent(true)}
+                onBlur={() => setTimeout(() => setShowRecent(false), 180)}
+                autoComplete="off"
+              />
 
-              {/* Compteur de résultats */}
-              {address && address.length >= 2 && (
-                <div className="result-counter">
-                  {counting ? (
-                    <div className="counting">
-                      <div className="spinner"></div>
-                      Comptage...
-                    </div>
-                  ) : resultCount !== null ? (
-                    <div className="count-display">
-                      📊 {resultCount} bien{resultCount > 1 ? 's' : ''} trouvé{resultCount > 1 ? 's' : ''}
-                    </div>
-                  ) : null}
+              {/* Live count badge */}
+              {dataSource === 'seloger' && address.length >= 2 && (resultCount !== null || counting) && (
+                <div className={`live-badge${counting ? ' counting' : ''}`}>
+                  {counting
+                    ? <span className="live-spin" />
+                    : <>{resultCount?.toLocaleString('fr-FR')} offres</>
+                  }
                 </div>
               )}
 
-              {/* Bouton filtres */}
-              <button
-                type="button"
-                className="filters-btn"
-                onClick={() => setShowFilters(true)}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="4" y1="6" x2="16" y2="6"/>
-                  <line x1="4" y1="12" x2="16" y2="12"/>
-                  <line x1="4" y1="18" x2="16" y2="18"/>
-                  <circle cx="18" cy="6" r="2"/>
-                  <circle cx="18" cy="12" r="2"/>
-                  <circle cx="18" cy="18" r="2"/>
-                </svg>
-                Filtres
-                {countActiveSelogerFilters() > 0 && (
-                  <span className="filter-badge">{countActiveSelogerFilters()}</span>
-                )}
-              </button>
-            </>
-          ) : (
-            // Interface MeilleursAgents - Simple
-            <>
-              <div className="form-section">
-                <label className="section-label">Quartier ou Ville</label>
-                <input
-                  type="text"
-                  className="address-input"
-                  placeholder=""
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  autoComplete="off"
-                />
-              </div>
+              {/* Recent searches */}
+              {showRecent && recentSearches.length > 0 && !address && (
+                <div className="recent-panel">
+                  <p className="recent-title">Recherches récentes</p>
+                  {recentSearches.map(r => (
+                    <button key={r} type="button" className="recent-row"
+                      onMouseDown={() => { setAddress(r); setShowRecent(false); }}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>
+                      </svg>
+                      {r}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
-              <button
-                type="button"
-                className="filters-btn"
-                onClick={() => setShowFilters(true)}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="4" y1="6" x2="16" y2="6"/>
-                  <line x1="4" y1="12" x2="16" y2="12"/>
-                  <line x1="4" y1="18" x2="16" y2="18"/>
-                  <circle cx="18" cy="6" r="2"/>
-                  <circle cx="18" cy="12" r="2"/>
-                  <circle cx="18" cy="18" r="2"/>
-                </svg>
-                Filtres
-                {countActiveFilters() > 0 && (
-                  <span className="filter-badge">{countActiveFilters()}</span>
-                )}
-              </button>
-            </>
-          )}
+            <button type="submit" className="search-btn" disabled={!address.trim() || loading}>
+              {loading
+                ? <span className="btn-spin" />
+                : <>Extraire les données <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></>
+              }
+            </button>
+          </form>
 
-          <button 
-            type="submit" 
-            className="submit-btn" 
-            disabled={loading || !address}
-          >
-            {loading ? (
-              <>
-                <div className="spinner"></div>
-                Recherche en cours...
-              </>
-            ) : (
-              <>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="11" cy="11" r="8"/>
-                  <path d="m21 21-4.35-4.35"/>
-                </svg>
-                Rechercher
-              </>
+          {/* Filter toggle row */}
+          <div className="filter-row">
+            <button
+              type="button"
+              className={`filter-btn${showFilters ? ' open' : ''}`}
+              onClick={() => setShowFilters(v => !v)}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="3" y1="6" x2="21" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/>
+                <line x1="10" y1="18" x2="14" y2="18"/>
+              </svg>
+              Filtres avancés
+              {activeFilters > 0 && <span className="filter-badge">{activeFilters}</span>}
+              <svg className={`chevron${showFilters ? ' up' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+            {activeFilters > 0 && (
+              <button type="button" className="clear-btn" onClick={resetFilters}>
+                Effacer tout
+              </button>
             )}
-          </button>
-        </form>
+          </div>
 
-        {error && (
-          <div className="error-box">
+          {/* Filter panel */}
+          {showFilters && (
+            <div className="filter-panel">
+              <div className="fp-grid">
+                <div className="fp-group">
+                  <span className="fp-lbl">Type de bien</span>
+                  <div className="fp-chips">
+                    {(dataSource === 'seloger' ? SELOGER_ESTATE_TYPES : MA_ITEM_TYPES).map(t => {
+                      const on = dataSource === 'seloger'
+                        ? selogerFilters.estateTypes.includes(t.value)
+                        : maFilters.itemTypes.includes(t.value);
+                      return (
+                        <button key={t.value} type="button" className={`chip${on ? ' on' : ''}`}
+                          onClick={() => dataSource === 'seloger' ? toggleSEType(t.value) : toggleMAType(t.value)}>
+                          {t.icon} {t.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="fp-group">
+                  <span className="fp-lbl">Pièces</span>
+                  {dataSource === 'meilleursagents' ? (
+                    <div className="fp-chips">
+                      {[1,2,3,4,5].map(r => (
+                        <button key={r} type="button"
+                          className={`chip chip-sm${maFilters.roomCount.includes(r) ? ' on' : ''}`}
+                          onClick={() => toggleMARoom(r)}>
+                          {r}{r === 5 ? '+' : ''}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="fp-range">
+                      <input type="number" className="fp-input" placeholder="Min" min="1" max="15"
+                        value={selogerFilters.numberOfRoomsMin}
+                        onChange={e => setSelogerFilters(p => ({ ...p, numberOfRoomsMin: e.target.value }))} />
+                      <span className="fp-dash">—</span>
+                      <input type="number" className="fp-input" placeholder="Max" min="1" max="15"
+                        value={selogerFilters.numberOfRoomsMax}
+                        onChange={e => setSelogerFilters(p => ({ ...p, numberOfRoomsMax: e.target.value }))} />
+                    </div>
+                  )}
+                </div>
+
+                <div className="fp-group">
+                  <span className="fp-lbl">Budget (€)</span>
+                  <div className="fp-range">
+                    <input type="number" className="fp-input fp-wide" placeholder="Min" min="0" step="5000"
+                      value={priceMin} onChange={e => setPriceMin(e.target.value)} />
+                    <span className="fp-dash">—</span>
+                    <input type="number" className="fp-input fp-wide" placeholder="Max" min="0" step="5000"
+                      value={priceMax} onChange={e => setPriceMax(e.target.value)} />
+                  </div>
+                </div>
+
+                <div className="fp-group">
+                  <span className="fp-lbl">Surface (m²)</span>
+                  <div className="fp-range">
+                    <input type="number" className="fp-input" placeholder="Min" min="0"
+                      value={spaceMin} onChange={e => setSpaceMin(e.target.value)} />
+                    <span className="fp-dash">—</span>
+                    <input type="number" className="fp-input" placeholder="Max" min="0"
+                      value={spaceMax} onChange={e => setSpaceMax(e.target.value)} />
+                  </div>
+                </div>
+
+                <div className="fp-group">
+                  <span className="fp-lbl">Résultats</span>
+                  <div className="fp-chips">
+                    {[10, 30, 50, 100].map(s => (
+                      <button key={s} type="button"
+                        className={`chip chip-sm${pageSize === s ? ' on' : ''}`}
+                        onClick={() => setPageSize(s)}>
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {dataSource === 'seloger' && (
+                  <div className="fp-group fp-group-full">
+                    <span className="fp-lbl">Options</span>
+                    <div className="fp-chips">
+                      {SELOGER_FEATURES.map(f => (
+                        <button key={f.value} type="button"
+                          className={`chip${selogerFilters.featuresIncluded.includes(f.value) ? ' on' : ''}`}
+                          onClick={() => toggleFeature(f.value)}>
+                          {f.icon} {f.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* ── Results ─────────────────────────────────────────────────────────── */}
+      <main className="results-section" ref={resultsRef}>
+
+        {loading && (
+          <div className="state-loading">
+            <div className="spinner-ring" />
+            <p>Extraction des données en cours…</p>
+          </div>
+        )}
+
+        {!loading && error && (
+          <div className="state-error">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"/>
-              <line x1="15" y1="9" x2="9" y2="15"/>
-              <line x1="9" y1="9" x2="15" y2="15"/>
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="13"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
             </svg>
-            <div className="error-content">
-              <h3>Erreur</h3>
+            <div>
+              <strong>Une erreur est survenue</strong>
               <p>{error}</p>
             </div>
           </div>
         )}
 
-        {/* Résultats SeLoger */}
-        {results && dataSource === 'seloger' && results.classifieds && results.classifieds.length > 0 && (
-          <div className="results-box">
-            <div className="results-header">
-              <div className="results-title">
-                <h2>🏘️ {results.totalCount} biens trouvés sur SeLoger</h2>
-                <p className="results-subtitle">
-                  {results.location.address} · {results.classifieds.length} annonces affichées
-                </p>
+        {!loading && !error && results && (
+          <div className="results-inner">
+            {/* Results toolbar */}
+            <div className="results-toolbar">
+              <div className="results-info">
+                <span className="results-num">
+                  {dataSource === 'seloger' ? slList.length : maFeats.length}
+                </span>
+                <span className="results-desc">
+                  {dataSource === 'seloger'
+                    ? `offre${slList.length > 1 ? 's' : ''} collectée${slList.length > 1 ? 's' : ''}`
+                    : `transaction${maFeats.length > 1 ? 's' : ''} enregistrée${maFeats.length > 1 ? 's' : ''}`}
+                  &nbsp;·&nbsp;
+                  <span className="results-loc">{searchedAddr}</span>
+                  {dataSource === 'seloger' && results.totalCount > slList.length && (
+                    <span className="results-total">
+                      &nbsp;({results.totalCount?.toLocaleString('fr-FR')} sur le marché)
+                    </span>
+                  )}
+                </span>
               </div>
-              <div className="export-buttons">
-                <button onClick={exportSelogerToCSV} className="export-btn">
+              <div className="results-export">
+                <button className="exp-btn" onClick={() => exportData('csv')}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="7 10 12 15 17 10"/>
-                    <line x1="12" y1="15" x2="12" y2="3"/>
+                    <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
                   </svg>
                   CSV
                 </button>
-                <button onClick={exportToExcel} className="export-btn">
+                <button className="exp-btn" onClick={() => exportData('xls')}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="7 10 12 15 17 10"/>
-                    <line x1="12" y1="15" x2="12" y2="3"/>
+                    <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
                   </svg>
                   Excel
                 </button>
               </div>
             </div>
-            <div className="table-container">
-              <table className="results-table seloger-table">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Type</th>
-                    <th>Prix</th>
-                    <th>€/m²</th>
-                    <th>Détails</th>
-                    <th>Localisation</th>
-                    <th>Agence</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {results.classifieds.map((classified, index) => {
-                    const keyfacts = classified.hardFacts?.keyfacts || [];
-                    const location = classified.location?.address || {};
-                    
-                    return (
-                      <tr key={classified.id}>
-                        <td>{index + 1}</td>
-                        <td className="type-cell">
-                          {classified.hardFacts?.title?.includes('Appartement') ? '🏢' : '🏠'}
-                          <span>{classified.hardFacts?.title}</span>
-                        </td>
-                        <td className="price-cell highlight">{classified.hardFacts?.price?.value}</td>
-                        <td className="center">{classified.hardFacts?.price?.additionalInformation}</td>
-                        <td className="details-cell">
-                          {keyfacts.map((fact, i) => (
-                            <span key={i} className="keyfact">{fact}</span>
-                          ))}
-                        </td>
-                        <td className="location-cell">
-                          {location.district && <div className="district">{location.district}</div>}
-                          <div className="city">{location.city} ({location.zipCode})</div>
-                        </td>
-                        <td className="agency-cell">
-                          <div className="agency-name">{classified.provider?.intermediaryCard?.title}</div>
-                          {classified.provider?.rating && (
-                            <div className="agency-rating">
-                              ⭐ {classified.provider.rating.rating.toFixed(1)} ({classified.provider.rating.reviews})
-                            </div>
-                          )}
-                        </td>
-                        <td className="actions-cell">
-                          <a href={classified.url} target="_blank" rel="noopener noreferrer" className="view-btn">
-                            Voir
-                          </a>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+
+            {/* MA stats */}
+            {dataSource === 'meilleursagents' && maFeats.length > 0 && (
+              <div className="stats-strip">
+                <div className="stat-item">
+                  <span className="stat-label">Prix moyen / m²</span>
+                  <span className="stat-value">{maAvg(p => p.updated_price / p.area).toLocaleString('fr-FR')} €</span>
+                </div>
+                <div className="stat-item">
+                  <span className="stat-label">Prix moyen</span>
+                  <span className="stat-value">{maAvg(p => p.updated_price).toLocaleString('fr-FR')} €</span>
+                </div>
+                <div className="stat-item">
+                  <span className="stat-label">Surface moyenne</span>
+                  <span className="stat-value">{maAvg(p => p.area)} m²</span>
+                </div>
+                <div className="stat-item">
+                  <span className="stat-label">Transactions</span>
+                  <span className="stat-value">{maFeats.length}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Table */}
+            <div className="table-card">
+              {dataSource === 'seloger' ? (
+                slList.length === 0 ? (
+                  <div className="empty-state">
+                    <span>🔍</span>
+                    <p>Aucune donnée collectée — élargissez la zone ou ajustez les filtres.</p>
+                  </div>
+                ) : (
+                  <div className="table-scroll">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>#</th><th>Type</th><th>Prix</th><th>€/m²</th>
+                          <th>Détails</th><th>Localisation</th><th>Agence</th><th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {slList.map((c, i) => {
+                          const kf  = c.hardFacts?.keyfacts || [];
+                          const loc = c.location?.address  || {};
+                          const isAppt = c.hardFacts?.title?.toLowerCase().includes('appartement');
+                          return (
+                            <tr key={c.id || i}>
+                              <td className="td-n">{i + 1}</td>
+                              <td className="td-type">
+                                <span>{isAppt ? '🏢' : '🏠'}</span>
+                                {c.hardFacts?.title}
+                              </td>
+                              <td className="td-price">{c.hardFacts?.price?.value}</td>
+                              <td className="td-ppm">{c.hardFacts?.price?.additionalInformation}</td>
+                              <td>
+                                <div className="kf-wrap">
+                                  {kf.map((f, j) => <span key={j} className="kf-tag">{f}</span>)}
+                                </div>
+                              </td>
+                              <td>
+                                {loc.district && <div className="td-district">{loc.district}</div>}
+                                <div className="td-city">{loc.city}{loc.zipCode ? ` (${loc.zipCode})` : ''}</div>
+                              </td>
+                              <td>
+                                {c.provider?.intermediaryCard?.title && (
+                                  <div className="td-agency">{c.provider.intermediaryCard.title}</div>
+                                )}
+                                {c.provider?.rating?.rating != null && (
+                                  <div className="td-rating">⭐ {Number(c.provider.rating.rating).toFixed(1)}</div>
+                                )}
+                              </td>
+                              <td>
+                                <a href={c.url} target="_blank" rel="noopener noreferrer" className="view-link">
+                                  Voir →
+                                </a>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              ) : (
+                maFeats.length === 0 ? (
+                  <div className="empty-state">
+                    <span>📊</span>
+                    <p>Aucune transaction DVF trouvée dans cette zone.</p>
+                  </div>
+                ) : (
+                  <div className="table-scroll">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>#</th><th>Adresse</th><th>Pièces</th><th>Surface m²</th>
+                          <th>Prix d&apos;origine</th><th>Prix actualisé</th><th>€/m²</th><th>Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {maFeats.map((feat, i) => {
+                          const p = feat.properties;
+                          return (
+                            <tr key={p.id || i}>
+                              <td className="td-n">{i + 1}</td>
+                              <td className="td-addr">{p.address_name}</td>
+                              <td className="td-c">{p.room_count}</td>
+                              <td className="td-c">{p.area}</td>
+                              <td>{p.price}</td>
+                              <td className="td-price">{p.updated_price?.toLocaleString('fr-FR')} €</td>
+                              <td className="td-ppm">{Math.round(p.updated_price / p.area)?.toLocaleString('fr-FR')}</td>
+                              <td className="td-date">{p.sale_at}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              )}
             </div>
           </div>
         )}
 
-        {/* Résultats MeilleursAgents */}
-        {results && dataSource === 'meilleursagents' && results.features && results.features.length > 0 && (
-          <div className="results-box">
-            <div className="results-header">
-              <div className="results-title">
-                <h2>📊 {results.features.length} transactions trouvées</h2>
-              </div>
-              <div className="export-buttons">
-                <button onClick={exportMeilleursAgentsToCSV} className="export-btn">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="7 10 12 15 17 10"/>
-                    <line x1="12" y1="15" x2="12" y2="3"/>
-                  </svg>
-                  CSV
-                </button>
-                <button onClick={exportToExcel} className="export-btn">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="7 10 12 15 17 10"/>
-                    <line x1="12" y1="15" x2="12" y2="3"/>
-                  </svg>
-                  Excel
-                </button>
-              </div>
+        {/* Empty state before any search */}
+        {!loading && !error && !results && (
+          <div className="landing-grid">
+            <div className="landing-card">
+              <div className="lc-icon">🏘️</div>
+              <h3>Offres actives — SeLoger</h3>
+              <p>Collectez les annonces en cours sur une zone pour analyser les prix demandés, les typologies de biens et l&apos;état du marché actuel.</p>
             </div>
-            <div className="table-container">
-              <table className="results-table">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Adresse</th>
-                    <th>Type</th>
-                    <th>Surface (m²)</th>
-                    <th>Prix</th>
-                    <th>Prix actualisé</th>
-                    <th>€/m²</th>
-                    <th>Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {results.features.map((feature, index) => {
-                    const props = feature.properties;
-                    const pricePerSqm = props.area > 0 
-                      ? Math.round(props.updated_price / props.area)
-                      : 0;
-                    
-                    return (
-                      <tr key={props.id || index}>
-                        <td>{index + 1}</td>
-                        <td className="address-cell">{props.address_name}</td>
-                        <td className="center">{props.room_count}</td>
-                        <td className="center">{props.area}</td>
-                        <td className="price-cell">{props.price}</td>
-                        <td className="price-cell">
-                          {props.updated_price.toLocaleString('fr-FR')} €
-                        </td>
-                        <td className="center highlight">{pricePerSqm.toLocaleString('fr-FR')}</td>
-                        <td className="center">{props.sale_at}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div className="landing-card">
+              <div className="lc-icon">📊</div>
+              <h3>Ventes passées — DVF</h3>
+              <p>Interrogez la base DVF pour connaître les prix réellement payés, calculer un prix au m² de référence et calibrer une estimation.</p>
             </div>
-            
-            <div className="stats-box">
-              <div className="stat-item">
-                <span className="stat-label">Prix moyen/m² :</span>
-                <span className="stat-value">
-                  {Math.round(
-                    results.features.reduce((sum, f) => 
-                      sum + (f.properties.updated_price / f.properties.area), 0
-                    ) / results.features.length
-                  ).toLocaleString('fr-FR')} €
-                </span>
-              </div>
-              <div className="stat-item">
-                <span className="stat-label">Prix moyen :</span>
-                <span className="stat-value">
-                  {Math.round(
-                    results.features.reduce((sum, f) => 
-                      sum + f.properties.updated_price, 0
-                    ) / results.features.length
-                  ).toLocaleString('fr-FR')} €
-                </span>
-              </div>
-              <div className="stat-item">
-                <span className="stat-label">Surface moyenne :</span>
-                <span className="stat-value">
-                  {Math.round(
-                    results.features.reduce((sum, f) => 
-                      sum + f.properties.area, 0
-                    ) / results.features.length
-                  )} m²
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {results && (
-          (dataSource === 'seloger' && (!results.classifieds || results.classifieds.length === 0)) ||
-          (dataSource === 'meilleursagents' && (!results.features || results.features.length === 0))
-        ) && (
-          <div className="results-box">
-            <h2>ℹ️ Aucun résultat</h2>
-            <p>Aucun bien trouvé pour cette recherche.</p>
-          </div>
-        )}
-
-        {/* Modal de filtres pour MeilleursAgents */}
-        {showFilters && dataSource === 'meilleursagents' && (
-          <div className="filters-modal-overlay" onClick={() => setShowFilters(false)}>
-            <div className="filters-modal" onClick={(e) => e.stopPropagation()}>
-              <div className="filters-modal-header">
-                <h2>Filtres</h2>
-                <button
-                  type="button"
-                  className="close-btn"
-                  onClick={() => setShowFilters(false)}
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
-                  </svg>
-                </button>
-              </div>
-
-              <div className="filters-modal-content">
-                <div className="filter-section">
-                  <label className="section-label">Type de bien</label>
-                  <div className="item-type-buttons">
-                    {itemTypeOptions.map(option => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className={`item-type-btn ${formData.itemTypes.includes(option.value) ? 'active' : ''}`}
-                        onClick={() => handleItemTypeToggle(option.value)}
-                      >
-                        <span className="item-type-icon">{option.icon}</span>
-                        <span className="item-type-label">{option.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="filter-section">
-                  <label className="section-label">Nombre de pièces</label>
-                  <div className="room-buttons">
-                    {roomOptions.map(room => (
-                      <button
-                        key={room}
-                        type="button"
-                        className={`room-btn ${formData.roomCount.includes(room) ? 'active' : ''}`}
-                        onClick={() => handleRoomToggle(room)}
-                      >
-                        {room}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="filter-section">
-                  <label className="section-label">
-                    Prix
-                    <span className="filter-range">
-                      {formatPrice(formData.priceMin)} - {formatPrice(formData.priceMax)}
-                    </span>
-                  </label>
-                  <div className="dual-range">
-                    <input
-                      type="range"
-                      min="0"
-                      max="2000000"
-                      step="10000"
-                      value={formData.priceMin}
-                      onChange={(e) => handlePriceChange('priceMin', e.target.value)}
-                      className="range-input range-min"
-                    />
-                    <input
-                      type="range"
-                      min="0"
-                      max="2000000"
-                      step="10000"
-                      value={formData.priceMax}
-                      onChange={(e) => handlePriceChange('priceMax', e.target.value)}
-                      className="range-input range-max"
-                    />
-                  </div>
-                </div>
-
-                <div className="filter-section">
-                  <label className="section-label">
-                    Surface
-                    <span className="filter-range">
-                      {formData.areaMin} - {formData.areaMax} m²
-                    </span>
-                  </label>
-                  <div className="dual-range">
-                    <input
-                      type="range"
-                      min="0"
-                      max="300"
-                      step="5"
-                      value={formData.areaMin}
-                      onChange={(e) => handleAreaChange('areaMin', e.target.value)}
-                      className="range-input range-min"
-                    />
-                    <input
-                      type="range"
-                      min="0"
-                      max="300"
-                      step="5"
-                      value={formData.areaMax}
-                      onChange={(e) => handleAreaChange('areaMax', e.target.value)}
-                      className="range-input range-max"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="filters-modal-footer">
-                <button
-                  type="button"
-                  className="reset-btn"
-                  onClick={() => {
-                    setFormData(prev => ({
-                      ...prev,
-                      roomCount: [],
-                      itemTypes: ['ITEM_TYPE.HOUSE', 'ITEM_TYPE.APARTMENT'],
-                      priceMin: 0,
-                      priceMax: 2000000,
-                      areaMin: 0,
-                      areaMax: 300
-                    }));
-                  }}
-                >
-                  Réinitialiser
-                </button>
-                <button
-                  type="button"
-                  className="apply-btn"
-                  onClick={() => setShowFilters(false)}
-                >
-                  Appliquer
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Modal de filtres pour SeLoger */}
-        {showFilters && dataSource === 'seloger' && (
-          <div className="filters-modal-overlay" onClick={() => setShowFilters(false)}>
-            <div className="filters-modal" onClick={(e) => e.stopPropagation()}>
-              <div className="filters-modal-header">
-                <h2>Filtres SeLoger</h2>
-                <button
-                  type="button"
-                  className="close-btn"
-                  onClick={() => setShowFilters(false)}
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
-                  </svg>
-                </button>
-              </div>
-
-              <div className="filters-modal-content">
-                {/* Type de bien */}
-                <div className="filter-section">
-                  <label className="section-label">Type de bien</label>
-                  <div className="item-type-buttons">
-                    {selogerEstateTypes.map(type => (
-                      <button
-                        key={type.value}
-                        type="button"
-                        className={`item-type-btn ${selogerFilters.estateTypes.includes(type.value) ? 'active' : ''}`}
-                        onClick={() => {
-                          setSelogerFilters(prev => ({
-                            ...prev,
-                            estateTypes: prev.estateTypes.includes(type.value)
-                              ? prev.estateTypes.filter(t => t !== type.value)
-                              : [...prev.estateTypes, type.value]
-                          }));
-                        }}
-                      >
-                        <span className="item-type-icon">{type.icon}</span>
-                        <span className="item-type-label">{type.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Nombre de pièces */}
-                <div className="filter-section">
-                  <label className="section-label">Nombre de pièces</label>
-                  <div className="input-group">
-                    <div className="input-wrapper">
-                      <label className="input-label">Minimum</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="15"
-                        value={selogerFilters.numberOfRoomsMin}
-                        onChange={(e) => setSelogerFilters(prev => ({
-                          ...prev,
-                          numberOfRoomsMin: e.target.value
-                        }))}
-                        className="number-input"
-                        placeholder=""
-                      />
-                    </div>
-                    <span className="separator">-</span>
-                    <div className="input-wrapper">
-                      <label className="input-label">Maximum</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="15"
-                        value={selogerFilters.numberOfRoomsMax}
-                        onChange={(e) => setSelogerFilters(prev => ({
-                          ...prev,
-                          numberOfRoomsMax: e.target.value
-                        }))}
-                        className="number-input"
-                        placeholder=""
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Prix */}
-                <div className="filter-section">
-                  <label className="section-label">Prix (€)</label>
-                  <div className="input-group">
-                    <div className="input-wrapper">
-                      <label className="input-label">Minimum</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="2000000"
-                        step="1000"
-                        value={selogerFilters.priceMin}
-                        onChange={(e) => setSelogerFilters(prev => ({
-                          ...prev,
-                          priceMin: e.target.value
-                        }))}
-                        className="number-input"
-                        placeholder=""
-                      />
-                    </div>
-                    <span className="separator">-</span>
-                    <div className="input-wrapper">
-                      <label className="input-label">Maximum</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="2000000"
-                        step="1000"
-                        value={selogerFilters.priceMax}
-                        onChange={(e) => setSelogerFilters(prev => ({
-                          ...prev,
-                          priceMax: e.target.value
-                        }))}
-                        className="number-input"
-                        placeholder=""
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Surface */}
-                <div className="filter-section">
-                  <label className="section-label">Surface (m²)</label>
-                  <div className="input-group">
-                    <div className="input-wrapper">
-                      <label className="input-label">Minimum</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="19999"
-                        step="1"
-                        value={selogerFilters.spaceMin}
-                        onChange={(e) => setSelogerFilters(prev => ({
-                          ...prev,
-                          spaceMin: e.target.value
-                        }))}
-                        className="number-input"
-                        placeholder=""
-                      />
-                    </div>
-                    <span className="separator">-</span>
-                    <div className="input-wrapper">
-                      <label className="input-label">Maximum</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="19999"
-                        step="1"
-                        value={selogerFilters.spaceMax}
-                        onChange={(e) => setSelogerFilters(prev => ({
-                          ...prev,
-                          spaceMax: e.target.value
-                        }))}
-                        className="number-input"
-                        placeholder=""
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Équipements */}
-                <div className="filter-section">
-                  <label className="section-label">Équipements</label>
-                  <div className="features-grid">
-                    {selogerFeatures.map(feature => (
-                      <button
-                        key={feature.value}
-                        type="button"
-                        className={`feature-btn ${selogerFilters.featuresIncluded.includes(feature.value) ? 'active' : ''}`}
-                        onClick={() => {
-                          setSelogerFilters(prev => ({
-                            ...prev,
-                            featuresIncluded: prev.featuresIncluded.includes(feature.value)
-                              ? prev.featuresIncluded.filter(f => f !== feature.value)
-                              : [...prev.featuresIncluded, feature.value]
-                          }));
-                        }}
-                      >
-                        <span className="feature-icon">{feature.icon}</span>
-                        <span className="feature-label">{feature.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="filters-modal-footer">
-                <button
-                  type="button"
-                  className="reset-btn"
-                  onClick={() => {
-                    setSelogerFilters({
-                      estateTypes: ['House', 'Apartment'],
-                      numberOfRoomsMin: '',
-                      numberOfRoomsMax: '',
-                      priceMin: '',
-                      priceMax: '',
-                      spaceMin: '',
-                      spaceMax: '',
-                      featuresIncluded: []
-                    });
-                  }}
-                >
-                  Réinitialiser
-                </button>
-                <button
-                  type="button"
-                  className="apply-btn"
-                  onClick={() => setShowFilters(false)}
-                >
-                  Appliquer
-                </button>
-              </div>
+            <div className="landing-card">
+              <div className="lc-icon">📥</div>
+              <h3>Export structuré</h3>
+              <p>Exportez les données brutes en CSV ou Excel et intégrez-les directement dans vos modèles d&apos;analyse ou vos outils BI.</p>
             </div>
           </div>
         )}
       </main>
+
+      <footer className="footer">
+        Données issues de SeLoger &amp; MeilleursAgents · Usage analytique uniquement · Non affilié
+      </footer>
     </div>
   );
 }
-
-export default App;
