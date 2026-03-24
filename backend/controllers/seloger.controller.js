@@ -1,12 +1,69 @@
 const axios = require('axios');
 const { createCirclePolyline } = require('../utils/polyline');
 
+// Use electron.net when available (Electron desktop app).
+// It routes through Chromium's network stack → real Chrome TLS fingerprint
+// → SeLoger cannot distinguish from a real browser.
+let electronNet = null;
+try {
+  const electron = require('electron');
+  electronNet = electron.net;
+} catch (_) { /* not running inside Electron — use axios */ }
+
 /**
- * Proxy SeLoger requests through ScraperAPI when SCRAPER_API_KEY is set.
- * ScraperAPI uses residential IPs — SeLoger doesn't block them.
- * Without the key (local dev), requests go directly.
+ * Make an HTTP request using the best available method:
+ *   1. electron.net  — Chromium TLS fingerprint (Electron desktop)
+ *   2. ScraperAPI    — residential IP proxy (Vercel / server)
+ *   3. axios direct  — local dev only
  */
-async function scraperRequest(config) {
+function makeRequest(config) {
+  if (electronNet) return electronNetRequest(config);
+  return scraperRequest(config);
+}
+
+function electronNetRequest(config) {
+  return new Promise((resolve, reject) => {
+    const req = electronNet.request({
+      method: (config.method || 'GET').toUpperCase(),
+      url:    config.url,
+    });
+
+    if (config.headers) {
+      for (const [k, v] of Object.entries(config.headers)) req.setHeader(k, v);
+    }
+
+    const timeout = config.timeout || 15000;
+    const timer = setTimeout(() => {
+      req.abort();
+      reject(new Error('electron.net request timed out'));
+    }, timeout);
+
+    req.on('response', (res) => {
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => {
+        clearTimeout(timer);
+        const body = Buffer.concat(chunks).toString();
+        if (res.statusCode >= 400) {
+          const err = new Error(`SeLoger responded with ${res.statusCode}`);
+          err.response = { status: res.statusCode, data: body };
+          return reject(err);
+        }
+        try { resolve({ data: JSON.parse(body) }); }
+        catch { reject(new Error('SeLoger returned non-JSON response')); }
+      });
+    });
+
+    req.on('error', (err) => { clearTimeout(timer); reject(err); });
+
+    if (config.data) {
+      req.write(typeof config.data === 'string' ? config.data : JSON.stringify(config.data));
+    }
+    req.end();
+  });
+}
+
+function scraperRequest(config) {
   const key = process.env.SCRAPER_API_KEY;
   if (!key) return axios.request(config);
 
@@ -67,7 +124,7 @@ async function getLocationData(text) {
     timeout: process.env.SCRAPER_API_KEY ? 55000 : 7000
   };
 
-  const response = await scraperRequest(config);
+  const response = await makeRequest(config);
   
   if (!response.data || response.data.length === 0) {
     throw new Error('Aucun résultat trouvé pour cette adresse');
@@ -124,7 +181,7 @@ async function searchByPlaceId(placeId, filters = {}) {
     timeout: process.env.SCRAPER_API_KEY ? 55000 : 7000
   };
 
-  const response = await scraperRequest(config);
+  const response = await makeRequest(config);
   return response.data;
 }
 
@@ -176,7 +233,7 @@ async function searchByPolyline(polyline, filters = {}) {
     timeout: process.env.SCRAPER_API_KEY ? 55000 : 7000
   };
 
-  const response = await scraperRequest(config);
+  const response = await makeRequest(config);
   return response.data;
 }
 
@@ -205,7 +262,7 @@ async function getClassifiedDetails(classifiedIds) {
   };
 
   try {
-    const response = await scraperRequest(config);
+    const response = await makeRequest(config);
     return response.data;
   } catch (error) {
     console.error('Erreur lors de la récupération des détails:', error.message);
@@ -260,7 +317,7 @@ async function countResults(placeId, polyline, filters = {}) {
     data: JSON.stringify(data)
   };
 
-  const response = await scraperRequest(config);
+  const response = await makeRequest(config);
   return response.data;
 }
 
