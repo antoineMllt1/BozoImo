@@ -21,6 +21,9 @@ nixPkgs = [
   "gtk3",
 ]
 
+[phases.install]
+cmds = []
+
 [phases.build]
 cmds = [
   "npm install --prefix backend",
