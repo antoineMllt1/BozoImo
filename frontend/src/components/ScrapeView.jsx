@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { RADIUS_OPTIONS } from '../utils/constants';
-import { stripDvfSnapshot } from '../utils/storage';
+import { stripDvfSnapshot, stripSelogerSnapshot } from '../utils/storage';
 import DvfTable     from './DvfTable';
 import SelogerTable from './SelogerTable';
 
@@ -104,7 +104,7 @@ export default function ScrapeView({ onBack }) {
         if (res.err || res.d?.error) {
           setSlSnap({ error: res.err || res.d.error });
         } else {
-          setSlSnap({ data: res.d, fetchedAt: new Date().toISOString() });
+          setSlSnap({ data: stripSelogerSnapshot(res.d), fetchedAt: new Date().toISOString() });
         }
       }
     }

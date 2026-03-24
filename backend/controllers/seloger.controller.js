@@ -8,6 +8,15 @@ let _page    = null;
 let _sessionReady = false;
 
 const CHROME_PATHS = [
+  // Env var override (Railway: set CHROME_EXECUTABLE=/usr/bin/chromium)
+  process.env.CHROME_EXECUTABLE,
+  // Linux — nixpkgs / Railway
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser',
+  '/usr/bin/google-chrome-stable',
+  '/usr/bin/google-chrome',
+  '/snap/bin/chromium',
+  // Windows — local dev
   process.env.LOCALAPPDATA + '\\Google\\Chrome\\Application\\chrome.exe',
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
   'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',

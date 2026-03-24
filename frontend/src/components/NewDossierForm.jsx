@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { SELOGER_ESTATE_TYPES, SELOGER_FEATURES, DEFAULT_SELOGER, RADIUS_OPTIONS } from '../utils/constants';
-import { stripDvfSnapshot } from '../utils/storage';
+import { stripDvfSnapshot, stripSelogerSnapshot } from '../utils/storage';
 
 const METERS_PER_DEG_LAT = 111320;
 
@@ -127,7 +127,7 @@ export default function NewDossierForm({ onCreated, onBack }) {
 
     // Build snapshots
     const selogerSnapshot = slRes.status === 'fulfilled' && !slRes.value?.error
-      ? { data: slRes.value, fetchedAt: new Date().toISOString() }
+      ? { data: stripSelogerSnapshot(slRes.value), fetchedAt: new Date().toISOString() }
       : { error: slRes.status === 'rejected' ? slRes.reason.message : (slRes.value?.error || 'Erreur') };
 
     let dvfRaw = null;
