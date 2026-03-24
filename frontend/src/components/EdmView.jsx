@@ -16,23 +16,23 @@ function Histogram({ refs, ppm2Min, ppm2Max }) {
   const vals = refs.map(r => r.ppm2).filter(v => v != null);
   if (vals.length < 2) return null;
   const lo = Math.min(...vals), hi = Math.max(...vals);
-  const BINS = 20, W = 300, H = 44;
+  const BINS = 20, W = 300, H = 52;
   const bw = (hi - lo) / BINS || 1;
   const counts = Array(BINS).fill(0);
   vals.forEach(v => { counts[Math.min(Math.floor((v - lo) / bw), BINS - 1)]++; });
   const maxC = Math.max(...counts, 1);
   const pw = W / BINS;
   return (
-    <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display:'block', borderRadius:4 }}>
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display:'block', borderRadius:6, background: 'var(--bg-soft)' }}>
       {counts.map((c, i) => {
         const bMin = lo + i * bw, bMax = bMin + bw;
         const inRange = (ppm2Min == null || bMax >= ppm2Min) && (ppm2Max == null || bMin <= ppm2Max);
-        const barH = (c / maxC) * (H - 2);
+        const barH = (c / maxC) * (H - 4);
         return <rect key={i} x={i * pw + 1} y={H - barH} width={pw - 2} height={barH}
-          fill={inRange ? 'var(--accent)' : '#e2e8f0'} rx="1" />;
+          fill={inRange ? 'var(--accent)' : 'var(--border-2)'} rx="2" opacity={inRange ? 1 : .5} />;
       })}
-      {ppm2Min != null && <line x1={(ppm2Min-lo)/(hi-lo)*W} y1="0" x2={(ppm2Min-lo)/(hi-lo)*W} y2={H} stroke="#3b82f6" strokeWidth="1.5" strokeDasharray="3,2" />}
-      {ppm2Max != null && <line x1={(ppm2Max-lo)/(hi-lo)*W} y1="0" x2={(ppm2Max-lo)/(hi-lo)*W} y2={H} stroke="#ef4444" strokeWidth="1.5" strokeDasharray="3,2" />}
+      {ppm2Min != null && <line x1={(ppm2Min-lo)/(hi-lo)*W} y1="0" x2={(ppm2Min-lo)/(hi-lo)*W} y2={H} stroke="var(--accent-text)" strokeWidth="2" strokeDasharray="4,2" />}
+      {ppm2Max != null && <line x1={(ppm2Max-lo)/(hi-lo)*W} y1="0" x2={(ppm2Max-lo)/(hi-lo)*W} y2={H} stroke="var(--error)" strokeWidth="2" strokeDasharray="4,2" />}
     </svg>
   );
 }
@@ -95,12 +95,17 @@ export default function EdmView({ dossier, tauxNego = 0.05, onPivotChange }) {
 
   const nDvf = allRefs.filter(r => r.source === 'dvf').length;
   const nSl  = allRefs.filter(r => r.source === 'seloger').length;
-  const activeFilters = [
-    filters.ppm2Min != null || filters.ppm2Max != null,
-    filters.types.length > 0,
-    filters.areaMin != null || filters.areaMax != null,
-    filters.dpe.length > 0,
-  ].filter(Boolean).length;
+  const activeFiltersList = [];
+  if (filters.ppm2Min != null || filters.ppm2Max != null)
+    activeFiltersList.push(`${filters.ppm2Min?.toLocaleString('fr-FR') ?? '—'} – ${filters.ppm2Max?.toLocaleString('fr-FR') ?? '—'} €/m²`);
+  if (filters.types.length > 0)
+    activeFiltersList.push(`Types: ${filters.types.join(', ')}`);
+  if (filters.areaMin != null || filters.areaMax != null)
+    activeFiltersList.push(`Surface: ${filters.areaMin ?? '—'} – ${filters.areaMax ?? '—'} m²`);
+  if (filters.dpe.length > 0)
+    activeFiltersList.push(`DPE: ${filters.dpe.join(', ')}`);
+  if (!filters.sources.includes('dvf')) activeFiltersList.push('DVF masqué');
+  if (!filters.sources.includes('seloger')) activeFiltersList.push('SeLoger masqué');
 
   const rowClass = r => {
     if (r.excluded) return 'ref-excluded';
@@ -119,38 +124,62 @@ export default function EdmView({ dossier, tauxNego = 0.05, onPivotChange }) {
   return (
     <div className="edm-layout">
 
-      {/* ── Barre de synthèse ── */}
-      <div className="edm-summary-bar">
-        <div className="esb-left">
-          <span className="esb-count">{metrics?.n ?? 0}</span>
-          <span className="esb-label">références utilisées</span>
-          {(filters.ppm2Min != null || filters.ppm2Max != null) && (
-            <span className="esb-range">
-              · fourchette {filters.ppm2Min?.toLocaleString('fr-FR')} – {filters.ppm2Max?.toLocaleString('fr-FR')} €/m²
-              <span className="esb-pct"> ({metrics?.pctCovered ?? 0}% du marché)</span>
-            </span>
-          )}
+      {/* ── Summary KPIs — always visible ── */}
+      <div className="edm-kpi-row">
+        <div className="edm-kpi-card">
+          <span className="edm-kpi-icon">📊</span>
+          <div>
+            <span className="edm-kpi-val">{metrics?.n ?? 0}<span className="edm-kpi-total"> / {allRefs.length}</span></span>
+            <span className="edm-kpi-lbl">Références retenues</span>
+          </div>
         </div>
-        <div className="esb-metrics">
-          {metrics?.avgWeighted && (
-            <div className="esb-kpi">
-              <span className="esb-kpi-val">{fmtPm2(metrics.avgWeighted)}</span>
-              <span className="esb-kpi-lbl">prix moyen</span>
-            </div>
-          )}
-          {metrics?.stdDev > 0 && (
-            <div className="esb-kpi">
-              <span className="esb-kpi-val">± {fmtPm2(metrics.stdDev)}</span>
-              <span className="esb-kpi-lbl">écart-type</span>
-            </div>
-          )}
+        <div className="edm-kpi-card">
+          <span className="edm-kpi-icon">📈</span>
+          <div>
+            <span className="edm-kpi-val">{metrics?.avgWeighted ? fmtPm2(metrics.avgWeighted) : '—'}</span>
+            <span className="edm-kpi-lbl">Prix moyen pondéré</span>
+          </div>
         </div>
+        <div className="edm-kpi-card">
+          <span className="edm-kpi-icon">📉</span>
+          <div>
+            <span className="edm-kpi-val">{metrics?.stdDev > 0 ? `± ${fmtPm2(metrics.stdDev)}` : '—'}</span>
+            <span className="edm-kpi-lbl">Écart-type</span>
+          </div>
+        </div>
+        <div className="edm-kpi-card">
+          <span className="edm-kpi-icon">🏢</span>
+          <div>
+            <span className="edm-kpi-val">{nDvf} DVF · {nSl} SL</span>
+            <span className="edm-kpi-lbl">Sources de données</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Active Filters Summary — always visible ── */}
+      {activeFiltersList.length > 0 && (
+        <div className="filter-summary">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14" style={{flexShrink:0}}>
+            <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm2 4a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1zm2 4a1 1 0 011-1h4a1 1 0 110 2H8a1 1 0 01-1-1z" clipRule="evenodd"/>
+          </svg>
+          <span style={{fontWeight:600, fontSize:'.75rem'}}>Filtres actifs :</span>
+          {activeFiltersList.map((f, i) => (
+            <span key={i} className="filter-summary-tag">{f}</span>
+          ))}
+          <button className="filter-summary-clear" onClick={() => { setFilters(DEFAULT_FILTERS); setIqrApplied(false); }}>
+            ✕ Réinitialiser
+          </button>
+        </div>
+      )}
+
+      {/* ── Filter toggle button ── */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button className={`edm-filter-toggle ${filtersOpen ? 'on' : ''}`} onClick={() => setFiltersOpen(p => !p)}>
           <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13">
             <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm2 4a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1zm2 4a1 1 0 011-1h4a1 1 0 110 2H8a1 1 0 01-1-1z" clipRule="evenodd"/>
           </svg>
-          Affiner les références
-          {activeFilters > 0 && <span className="edm-filter-badge">{activeFilters}</span>}
+          {filtersOpen ? 'Masquer les filtres' : 'Affiner les références'}
+          {activeFiltersList.length > 0 && <span className="edm-filter-badge">{activeFiltersList.length}</span>}
         </button>
       </div>
 
@@ -158,7 +187,7 @@ export default function EdmView({ dossier, tauxNego = 0.05, onPivotChange }) {
       {filtersOpen && (
         <div className="edm-filter-panel">
           <div className="efp-intro">
-            <strong>Affiner les références de marché</strong> — Seules les références dans la fourchette sont utilisées pour calculer les prix par typologie ci-dessous. Les barres grises sont exclues du calcul.
+            <strong>Paramétrage des références de marché</strong> — Ajustez la fourchette de prix, les sources et typologies pour ne garder que les références pertinentes. Les barres du graphique en gris sont exclues du calcul.
           </div>
           <div className="efp-blocks">
             {/* Fourchette */}
@@ -169,7 +198,7 @@ export default function EdmView({ dossier, tauxNego = 0.05, onPivotChange }) {
               <div className="efp-histo"><Histogram refs={allRefs.filter(r => !r.excluded)} ppm2Min={filters.ppm2Min} ppm2Max={filters.ppm2Max} /></div>
               {suggested && (
                 <button className="ef-suggest-btn" onClick={() => setFilters(p => ({ ...p, ppm2Min: suggested.min, ppm2Max: suggested.max }))}>
-                  ↺ Suggestion automatique : {suggested.min.toLocaleString('fr-FR')} – {suggested.max.toLocaleString('fr-FR')} €/m² ({suggested.pct}% couvert)
+                  ↺ Suggestion IQR : {suggested.min.toLocaleString('fr-FR')} – {suggested.max.toLocaleString('fr-FR')} €/m² ({suggested.pct}% couvert)
                 </button>
               )}
               <div className="ef-range-row">
@@ -182,7 +211,7 @@ export default function EdmView({ dossier, tauxNego = 0.05, onPivotChange }) {
             <div className="efp-block">
               <div className="efp-label">Source</div>
               <div className="ef-chips">
-                {[['dvf','📊 DVF',nDvf,'Transactions notariées'],['seloger','🏘️ SeLoger',nSl,'Offres actives (prix négo.)']].map(([s,lbl,n,hint]) => (
+                {[['dvf','📊 DVF',nDvf,'Transactions notariées'],['seloger','🏘️ SeLoger',nSl,'Offres actives (négo.)']].map(([s,lbl,n,hint]) => (
                   <div key={s} style={{display:'flex',flexDirection:'column',gap:2}}>
                     <button className={`ef-chip ${filters.sources.includes(s) ? 'on' : ''}`} onClick={() => toggleChip('sources', s)}>
                       {lbl} <span className="ef-chip-n">({n})</span>
@@ -193,11 +222,11 @@ export default function EdmView({ dossier, tauxNego = 0.05, onPivotChange }) {
               </div>
               {filters.sources.includes('seloger') && (
                 <div className="efp-taux">
-                  <span>Taux de négociation annonces :</span>
+                  <span>Taux de négociation :</span>
                   <input type="number" min="0" max="20" step="0.5" className="ef-input ef-input-sm"
                     value={localTaux} onChange={e => setLocalTaux(+e.target.value)} />
                   <span>%</span>
-                  <span className="efp-hint">Les prix SeLoger sont réduits de ce % avant calcul</span>
+                  <span className="efp-hint">Prix SeLoger réduits de ce %</span>
                 </div>
               )}
             </div>
@@ -230,7 +259,7 @@ export default function EdmView({ dossier, tauxNego = 0.05, onPivotChange }) {
                 </label>
               </div>
               <div className="efp-hint" style={{marginBottom:6}}>
-                Donne plus de poids aux transactions récentes dans le calcul de la moyenne
+                Donne plus de poids aux transactions récentes
               </div>
               {temporal.enabled && (
                 <div className="efp-temporal">
@@ -239,7 +268,7 @@ export default function EdmView({ dossier, tauxNego = 0.05, onPivotChange }) {
                       <span>{lbl}</span>
                       <input type="number" step="0.1" min="0" max="2" className="ef-input ef-input-sm"
                         value={temporal[k]} onChange={e => setTemporal(p => ({ ...p, [k]: +e.target.value }))} />
-                      <span>× (poids relatif)</span>
+                      <span>×</span>
                     </div>
                   ))}
                 </div>
@@ -248,6 +277,35 @@ export default function EdmView({ dossier, tauxNego = 0.05, onPivotChange }) {
           </div>
           <div className="efp-footer">
             <button className="efp-reset" onClick={() => { setFilters(DEFAULT_FILTERS); setIqrApplied(false); }}>Réinitialiser les filtres</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Cross-table: Prix par typologie (Excel-style) ── */}
+      {metrics && Object.keys(metrics.byType).length > 0 && (
+        <div className="edm-cross-table">
+          <div className="ect-header">
+            <h3 className="ect-title">Prix de marché par typologie</h3>
+            <span className="ect-sub">Basé sur {metrics.n} références filtrées — {metrics.nDvf} DVF, {metrics.nSl} SeLoger</span>
+          </div>
+          <div className="ect-grid">
+            <div className="ect-head-row">
+              <span>Typologie</span>
+              <span>Nb références</span>
+              <span>Prix moyen pondéré</span>
+              <span>Prix moyen simple</span>
+            </div>
+            {TYPES.map(t => {
+              const d = metrics.byType[t];
+              return (
+                <div key={t} className={`ect-row ${!d ? 'ect-row-na' : ''}`}>
+                  <span className="ect-type">{t}</span>
+                  <span className="ect-n">{d ? d.n : '—'}</span>
+                  <span className="ect-val">{d ? fmtPm2(d.avgWeighted) : '—'}</span>
+                  <span className="ect-val-light">{d ? fmtPm2(d.avg) : '—'}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -316,11 +374,11 @@ export default function EdmView({ dossier, tauxNego = 0.05, onPivotChange }) {
       {/* ── Références (détail) ── */}
       <div className="edm-refs-section">
         <button className="edm-refs-toggle" onClick={() => setRefsOpen(p => !p)}>
-          <span>Voir les références de marché utilisées</span>
+          <span>Détail des références de marché</span>
           <span className="edm-refs-meta">
             {metrics?.nDvf ?? 0} DVF · {metrics?.nSl ?? 0} SeLoger · triées par €/m²
           </span>
-          <span className="edm-refs-arrow">{refsOpen ? '▲ Masquer' : '▼ Afficher'}</span>
+          <span className="edm-refs-arrow">{refsOpen ? '▲ Masquer' : '▼ Afficher le tableau'}</span>
         </button>
 
         {refsOpen && (

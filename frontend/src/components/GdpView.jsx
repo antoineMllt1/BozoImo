@@ -64,8 +64,8 @@ export default function GdpView({ dossier, prixPivot: initPivot, onUpdate }) {
         <div className="gdp-guide-banner">
           <span className="gdp-guide-icon">💡</span>
           <div>
-            <strong>Commencez par l'onglet "Analyse de marché"</strong> pour calculer le Prix Pivot,
-            puis cliquez sur "Envoyer à la Grille de prix". Vous pouvez aussi saisir un prix manuellement ci-dessous.
+            <strong>Commencez par l&apos;onglet &laquo; Étude de marché &raquo;</strong> pour calculer le Prix Pivot,
+            puis cliquez sur &laquo; Envoyer à la Grille de prix &raquo;. Vous pouvez aussi saisir un prix manuellement ci-dessous.
           </div>
         </div>
       )}
@@ -79,10 +79,53 @@ export default function GdpView({ dossier, prixPivot: initPivot, onUpdate }) {
         {prixPivot && <span className="gdp-pivot-set">✓ Prix Pivot défini — vous pouvez ajouter vos lots</span>}
       </div>
 
+      {/* KPIs — above the table for immediate visibility */}
+      {kpis && (
+        <div className="edm-kpi-row" style={{ gridTemplateColumns: `repeat(${kpis.nAlerts > 0 ? 5 : 4}, 1fr)` }}>
+          <div className="edm-kpi-card">
+            <span className="edm-kpi-icon">🏢</span>
+            <div>
+              <span className="edm-kpi-val">{kpis.n}</span>
+              <span className="edm-kpi-lbl">Lots saisis</span>
+            </div>
+          </div>
+          <div className="edm-kpi-card">
+            <span className="edm-kpi-icon">💰</span>
+            <div>
+              <span className="edm-kpi-val">{fmtK(kpis.total)}</span>
+              <span className="edm-kpi-lbl">Valeur totale</span>
+            </div>
+          </div>
+          <div className="edm-kpi-card">
+            <span className="edm-kpi-icon">📐</span>
+            <div>
+              <span className="edm-kpi-val">{fmtPm2(kpis.ppm2)}</span>
+              <span className="edm-kpi-lbl">€/m² moyen pondéré</span>
+            </div>
+          </div>
+          <div className="edm-kpi-card">
+            <span className="edm-kpi-icon">🔧</span>
+            <div>
+              <span className="edm-kpi-val">{fmtK(kpis.travaux)}</span>
+              <span className="edm-kpi-lbl">Budget travaux</span>
+            </div>
+          </div>
+          {kpis.nAlerts > 0 && (
+            <div className="edm-kpi-card" style={{ borderColor: '#fde68a', background: '#fffbeb' }}>
+              <span className="edm-kpi-icon">⚠️</span>
+              <div>
+                <span className="edm-kpi-val" style={{ color: '#d97706' }}>{kpis.nAlerts}</span>
+                <span className="edm-kpi-lbl">Alertes</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Lots table */}
       <div className="gdp-table-wrap">
         <div className="gdp-table-head">
-          <span>{computedLots.length} lot{computedLots.length > 1 ? 's' : ''}</span>
+          <span>{computedLots.length} lot{computedLots.length > 1 ? 's' : ''} {prixPivot ? `· Prix Pivot ${Math.round(prixPivot).toLocaleString('fr-FR')} €/m²` : ''}</span>
           <button className="btn-primary btn-sm" onClick={() => { setEditLot(newLot()); setIsNew(true); }}>
             + Ajouter un lot
           </button>
@@ -91,7 +134,10 @@ export default function GdpView({ dossier, prixPivot: initPivot, onUpdate }) {
         {computedLots.length === 0 ? (
           <div className="empty-state">
             <span>🏢</span>
-            <p>{prixPivot ? 'Prix Pivot défini — ajoutez vos lots pour calculer leur valeur.' : 'Définissez le Prix Pivot puis ajoutez vos lots.'}</p>
+            <p>{prixPivot
+              ? 'Prix Pivot défini — cliquez sur « + Ajouter un lot » pour commencer la valorisation.'
+              : 'Définissez le Prix Pivot ci-dessus, puis ajoutez vos lots pour calculer leur valeur.'
+            }</p>
           </div>
         ) : (
           <div className="table-scroll">
@@ -148,19 +194,6 @@ export default function GdpView({ dossier, prixPivot: initPivot, onUpdate }) {
           </div>
         )}
       </div>
-
-      {/* KPIs */}
-      {kpis && (
-        <div className="gdp-kpis">
-          <div className="gdp-kpi"><span className="gdp-kpi-lbl">Lots</span><span className="gdp-kpi-val">{kpis.n}</span></div>
-          <div className="gdp-kpi"><span className="gdp-kpi-lbl">Valeur totale</span><span className="gdp-kpi-val">{fmtK(kpis.total)}</span></div>
-          <div className="gdp-kpi"><span className="gdp-kpi-lbl">€/m² moy. pond.</span><span className="gdp-kpi-val">{fmtPm2(kpis.ppm2)}</span></div>
-          <div className="gdp-kpi"><span className="gdp-kpi-lbl">Total travaux</span><span className="gdp-kpi-val">{fmtK(kpis.travaux)}</span></div>
-          {kpis.nAlerts > 0 && (
-            <div className="gdp-kpi gdp-kpi-alert"><span className="gdp-kpi-lbl">Alertes</span><span className="gdp-kpi-val">{kpis.nAlerts}</span></div>
-          )}
-        </div>
-      )}
 
       {/* Modal */}
       {editLot && (

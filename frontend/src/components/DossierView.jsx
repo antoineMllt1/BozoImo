@@ -1,39 +1,121 @@
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { stripSelogerSnapshot } from '../utils/storage';
 import DvfTable        from './DvfTable';
 import SelogerTable    from './SelogerTable';
 import EstimationPanel from './EstimationPanel';
-import EdmView         from './EdmView';
+import FiltragView     from './FiltragView';
+import AnalyseView     from './AnalyseView';
 import GdpView         from './GdpView';
-import { computeEstimate, addConfirmation } from '../utils/model';
+import { normalizeRefs, applyFilters, computeMetrics, suggestRange } from '../utils/edm';
+import { computeEstimateFromRefs, addConfirmation } from '../utils/model';
 import { saveModel } from '../utils/storage';
-import { fmtDate } from '../utils/formatters';
+import { fmtDate, fmtPm2 } from '../utils/formatters';
 
 const STATUS_LABEL = { draft: 'Brouillon', estimated: 'Estimé', confirmed: 'Confirmé' };
 const STATUS_CLASS = { draft: 'badge-draft', estimated: 'badge-estimated', confirmed: 'badge-confirmed' };
 const RADIUS_LABELS = { 250: '250m', 500: '500m', 1000: '1km', 2000: '2km', 5000: '5km' };
 
+const DEFAULT_FILTERS = {
+  ppm2Min: null, ppm2Max: null,
+  types: [], sources: ['dvf', 'seloger'],
+  areaMin: null, areaMax: null,
+  dpe: [],
+};
+
+const STEPS_BUILDING = [
+  { id: 'collecte', label: 'Collecte',         desc: 'Données DVF & SeLoger' },
+  { id: 'filtrage', label: 'Filtrage',          desc: 'Sélection des références' },
+  { id: 'analyse',  label: 'Analyse',           desc: 'Étude de marché manuelle' },
+  { id: 'gdp',      label: 'Grille de prix',    desc: 'Valorisation lot par lot' },
+  { id: 'estim',    label: 'Estimation',        desc: 'ML vs Analyste' },
+];
+
+const STEPS_SINGLE = [
+  { id: 'collecte', label: 'Collecte',         desc: 'Données DVF & SeLoger' },
+  { id: 'filtrage', label: 'Filtrage',          desc: 'Sélection des références' },
+  { id: 'analyse',  label: 'Analyse',           desc: 'Étude de marché manuelle' },
+  { id: 'estim',    label: 'Estimation',        desc: 'ML vs Analyste' },
+];
+
 export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, onBack }) {
-  const [tab, setTab] = useState('edm');
+  const isBuilding = dossier.analysisMode === 'building';
+  const STEPS = isBuilding ? STEPS_BUILDING : STEPS_SINGLE;
+
+  const [tab, setTab] = useState('collecte');
   const [dataTab, setDataTab] = useState('dvf');
-  const [prixPivotEdm, setPrixPivotEdm] = useState(dossier.prixPivot || null);
   const [slRefetching, setSlRefetching] = useState(false);
 
-  const features = dossier.dvfSnapshot?.data?.features || [];
+  // ── Centralized filter/analysis state ──────────────────────────────
+  const [filters, setFilters] = useState(dossier.analystFilters || DEFAULT_FILTERS);
+  const [exclusions, setExclusions] = useState(dossier.analystExclusions || {});
+  const [temporal, setTemporal] = useState({ enabled: false, w0_6: 1.2, w6_12: 1.0, w12_24: 0.8, w24plus: 0.6 });
+  const [tauxNego, setTauxNego] = useState(5);
+  const [prixPivot, setPrixPivot] = useState(dossier.prixPivot || null);
+  const [manualEstimate, setManualEstimate] = useState(dossier.manualEstimate || null);
+  const [iqrApplied, setIqrApplied] = useState(false);
 
-  const handleToggle = useCallback((idx) => {
-    const next = dossier.selectedComps.includes(idx)
-      ? dossier.selectedComps.filter(i => i !== idx)
-      : [...dossier.selectedComps, idx];
-    onUpdate({ ...dossier, selectedComps: next });
-  }, [dossier, onUpdate]);
+  const effectiveTaux = tauxNego / 100;
 
-  const estimate = useMemo(
-    () => computeEstimate(features, dossier.selectedComps, dossier.target, model.correctionFactor),
-    [features, dossier.selectedComps, dossier.target, model.correctionFactor]
+  // ── Derived data (shared across tabs) ──────────────────────────────
+  const allRefs = useMemo(() => {
+    const refs = normalizeRefs(dossier.dvfSnapshot, dossier.selogerSnapshot, effectiveTaux);
+    return refs.map(r => ({ ...r, excluded: exclusions[r.id] || false }));
+  }, [dossier.dvfSnapshot, dossier.selogerSnapshot, effectiveTaux, exclusions]);
+
+  const suggested = useMemo(() => suggestRange(allRefs.filter(r => !r.excluded)), [allRefs]);
+
+  // Auto-apply IQR on first load
+  useMemo(() => {
+    if (!iqrApplied && suggested) {
+      setFilters(p => ({ ...p, ppm2Min: suggested.min, ppm2Max: suggested.max }));
+      setIqrApplied(true);
+    }
+  }, [suggested, iqrApplied]);
+
+  const filtered = useMemo(() => applyFilters(allRefs, filters), [allRefs, filters]);
+  const metrics = useMemo(
+    () => computeMetrics(allRefs, filtered, filters, effectiveTaux, temporal.enabled ? temporal : null),
+    [allRefs, filtered, filters, effectiveTaux, temporal]
   );
 
-  const handleConfirm = (basePm2, actualPrice) => {
+  // ML estimate from filtered refs
+  const mlEstimate = useMemo(
+    () => computeEstimateFromRefs(filtered, dossier.target, model.correctionFactor),
+    [filtered, dossier.target, model.correctionFactor]
+  );
+
+  const features = dossier.dvfSnapshot?.data?.features || [];
+  const t = dossier.target || {};
+  const slCount = dossier.selogerSnapshot?.data?.classifieds?.length || 0;
+  const dvfCount = features.length;
+
+  // ── Persist filters/exclusions back to dossier ─────────────────────
+  const persistFilters = useCallback((f) => {
+    setFilters(f);
+    onUpdate({ ...dossier, analystFilters: f });
+  }, [dossier, onUpdate]);
+
+  const persistExclusions = useCallback((exc) => {
+    setExclusions(exc);
+    onUpdate({ ...dossier, analystExclusions: exc });
+  }, [dossier, onUpdate]);
+
+  // ── Handlers ───────────────────────────────────────────────────────
+  const handlePivotChange = useCallback((pivot) => {
+    setPrixPivot(pivot);
+    onUpdate({ ...dossier, prixPivot: pivot });
+  }, [dossier, onUpdate]);
+
+  const handleManualEstimate = useCallback((val) => {
+    setManualEstimate(val);
+    onUpdate({ ...dossier, manualEstimate: val });
+  }, [dossier, onUpdate]);
+
+  const handleGdpUpdate = useCallback((updated) => {
+    onUpdate(updated);
+  }, [onUpdate]);
+
+  const handleConfirm = useCallback((basePm2, actualPrice) => {
     const { surfaceM2 } = dossier.target;
     if (!surfaceM2) return;
     const result = addConfirmation(model.samples, { basePm2, actualPrice, surfaceM2, dossierId: dossier.id, address: dossier.address });
@@ -42,16 +124,7 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
     saveModel(updatedModel);
     onConfirmPrice(updatedModel);
     onUpdate({ ...dossier, status: 'confirmed', confirmed: { actualPrice, actualPm2: Math.round(actualPrice / surfaceM2), confirmedAt: new Date().toISOString() } });
-  };
-
-  const handlePivotChange = (pivot) => {
-    setPrixPivotEdm(pivot);
-    onUpdate({ ...dossier, prixPivot: pivot });
-  };
-
-  const handleGdpUpdate = (updated) => {
-    onUpdate(updated);
-  };
+  }, [dossier, model, onUpdate, onConfirmPrice]);
 
   const handleRefetchSeloger = useCallback(async () => {
     if (slRefetching || !dossier.lat || !dossier.lng) return;
@@ -60,7 +133,7 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
       const res = await fetch('/api/seloger/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lat: dossier.lat, lng: dossier.lng, radius: dossier.radiusMeters, filters: { size: 50 } }),
+        body: JSON.stringify({ lat: dossier.lat, lng: dossier.lng, radius: dossier.radiusMeters, filters: { size: 100 } }),
       });
       const data = await res.json();
       const selogerSnapshot = data?.error
@@ -74,9 +147,15 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
     }
   }, [dossier, slRefetching, onUpdate]);
 
-  const t = dossier.target || {};
-  const slCount = dossier.selogerSnapshot?.data?.classifieds?.length || 0;
-  const dvfCount = features.length;
+  // ── Step completion states ─────────────────────────────────────────
+  const stepState = (id) => {
+    if (id === 'collecte' && (dvfCount > 0 || slCount > 0)) return 'completed';
+    if (id === 'filtrage' && filtered.length > 0 && filtered.length < allRefs.length) return 'completed';
+    if (id === 'analyse' && prixPivot) return 'completed';
+    if (id === 'gdp' && dossier.lots?.length > 0) return 'completed';
+    if (id === 'estim' && dossier.confirmed) return 'completed';
+    return '';
+  };
 
   return (
     <div className="workspace">
@@ -101,70 +180,132 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
             {t.rooms && <><span className="ws-sep">·</span><span>{t.rooms} pièce{t.rooms > 1 ? 's' : ''}</span></>}
             {t.type && <><span className="ws-sep">·</span><span>{t.type === 'Apartment' ? 'Appartement' : 'Maison'}</span></>}
             <span className="ws-sep">·</span><span>{fmtDate(dossier.createdAt)}</span>
+            <span className="ws-sep">·</span>
+            <span className={`status-badge ${isBuilding ? 'badge-estimated' : 'badge-draft'}`}>
+              {isBuilding ? 'Immeuble' : 'Bien unique'}
+            </span>
           </div>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="ws-tabs ws-tabs-main">
-        <button className={`ws-tab ${tab === 'edm' ? 'active' : ''}`} onClick={() => setTab('edm')}>
-          <span className="ws-tab-step">1</span> Analyse de marché
-          <span className="ws-tab-count">{dvfCount + slCount}</span>
-        </button>
-        <button className={`ws-tab ${tab === 'gdp' ? 'active' : ''}`} onClick={() => setTab('gdp')}>
-          <span className="ws-tab-step">2</span> Grille de prix
-          {(dossier.lots?.length > 0) && <span className="ws-tab-count">{dossier.lots.length}</span>}
-        </button>
-        <button className={`ws-tab ws-tab-secondary ${tab === 'donnees' ? 'active' : ''}`} onClick={() => setTab('donnees')}>
-          📊 Données brutes
-        </button>
-        <button className={`ws-tab ws-tab-secondary ${tab === 'estim' ? 'active' : ''}`} onClick={() => setTab('estim')}>
-          🔢 Estimation ML
-        </button>
+      {/* Step Navigation */}
+      <div className="step-nav">
+        {STEPS.map((s, i) => (
+          <button
+            key={s.id}
+            className={`step-nav-item ${tab === s.id ? 'active' : ''} ${stepState(s.id)}`}
+            onClick={() => setTab(s.id)}
+          >
+            <span className="step-num">{stepState(s.id) === 'completed' ? '✓' : String(i + 1)}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1 }}>
+              <span className="step-label">{s.label}</span>
+              <span style={{ fontSize: '.65rem', fontWeight: 400, opacity: .7 }}>{s.desc}</span>
+            </div>
+            {i < STEPS.length - 1 && <span className="step-arrow" />}
+          </button>
+        ))}
       </div>
 
-      {tab === 'edm' && (
-        <EdmView
-          dossier={dossier}
-          tauxNego={0.05}
-          onPivotChange={handlePivotChange}
-        />
-      )}
+      {/* Quick stats bar */}
+      <div className="ws-quick-stats">
+        <div className="wqs-item">
+          <span className="wqs-val">{dvfCount}</span>
+          <span className="wqs-lbl">Transactions DVF</span>
+        </div>
+        <div className="wqs-item">
+          <span className="wqs-val">{slCount}</span>
+          <span className="wqs-lbl">Annonces SeLoger</span>
+        </div>
+        <div className="wqs-item">
+          <span className="wqs-val">{filtered.length}<span style={{ fontSize: '.75rem', fontWeight: 400, color: 'var(--text-3)' }}> / {allRefs.length}</span></span>
+          <span className="wqs-lbl">Refs retenues</span>
+        </div>
+        {prixPivot && (
+          <div className="wqs-item wqs-highlight">
+            <span className="wqs-val">{Math.round(prixPivot).toLocaleString('fr-FR')} €/m²</span>
+            <span className="wqs-lbl">Prix Pivot</span>
+          </div>
+        )}
+        {mlEstimate && (
+          <div className="wqs-item wqs-highlight">
+            <span className="wqs-val">{Math.round(mlEstimate.correctedPm2).toLocaleString('fr-FR')} €/m²</span>
+            <span className="wqs-lbl">Estimation ML</span>
+          </div>
+        )}
+        {isBuilding && dossier.lots?.length > 0 && (
+          <div className="wqs-item">
+            <span className="wqs-val">{dossier.lots.length}</span>
+            <span className="wqs-lbl">Lots saisis</span>
+          </div>
+        )}
+      </div>
 
-      {tab === 'gdp' && (
-        <GdpView
-          dossier={dossier}
-          prixPivot={prixPivotEdm}
-          onUpdate={handleGdpUpdate}
-        />
-      )}
-
-      {tab === 'donnees' && (
+      {/* ── Tab: Collecte ── */}
+      {tab === 'collecte' && (
         <div className="ws-data">
           <div className="ws-tabs">
             <button className={`ws-tab ${dataTab === 'dvf' ? 'active' : ''}`} onClick={() => setDataTab('dvf')}>
-              📊 DVF {dvfCount > 0 && <span className="ws-tab-count">{dvfCount}</span>}
+              DVF — Transactions notariées {dvfCount > 0 && <span className="ws-tab-count">{dvfCount}</span>}
             </button>
             <button className={`ws-tab ${dataTab === 'seloger' ? 'active' : ''}`} onClick={() => setDataTab('seloger')}>
-              🏘️ SeLoger {slCount > 0 && <span className="ws-tab-count">{slCount}</span>}
+              SeLoger — Offres actives {slCount > 0 && <span className="ws-tab-count">{slCount}</span>}
             </button>
           </div>
-          {dataTab === 'dvf' && <DvfTable snapshot={dossier.dvfSnapshot} selectedComps={dossier.selectedComps} onToggle={handleToggle} />}
+          {dataTab === 'dvf' && <DvfTable snapshot={dossier.dvfSnapshot} selectedComps={dossier.selectedComps || []} onToggle={() => {}} />}
           {dataTab === 'seloger' && <SelogerTable snapshot={dossier.selogerSnapshot} onRefetch={handleRefetchSeloger} refetching={slRefetching} />}
         </div>
       )}
 
+      {/* ── Tab: Filtrage ── */}
+      {tab === 'filtrage' && (
+        <FiltragView
+          allRefs={allRefs}
+          filters={filters}
+          onFiltersChange={persistFilters}
+          exclusions={exclusions}
+          onExclusionsChange={persistExclusions}
+          filtered={filtered}
+          metrics={metrics}
+          suggested={suggested}
+          onTemporalChange={setTemporal}
+        />
+      )}
+
+      {/* ── Tab: Analyse ── */}
+      {tab === 'analyse' && (
+        <AnalyseView
+          dossier={dossier}
+          filteredRefs={filtered}
+          metrics={metrics}
+          prixPivot={prixPivot}
+          onPivotChange={handlePivotChange}
+          isBuilding={isBuilding}
+          onManualEstimate={handleManualEstimate}
+        />
+      )}
+
+      {/* ── Tab: GDP (building only) ── */}
+      {tab === 'gdp' && (
+        <GdpView
+          dossier={dossier}
+          prixPivot={prixPivot}
+          onUpdate={handleGdpUpdate}
+        />
+      )}
+
+      {/* ── Tab: Estimation ── */}
       {tab === 'estim' && (
-        <div className="ws-body">
-          <div className="ws-data">
-            <div className="ws-tabs">
-              <button className={`ws-tab${true ? ' active' : ''}`}>📊 DVF {dvfCount > 0 && <span className="ws-tab-count">{dvfCount}</span>}</button>
-            </div>
-            <DvfTable snapshot={dossier.dvfSnapshot} selectedComps={dossier.selectedComps} onToggle={handleToggle} />
-          </div>
-          <div className="ws-est">
-            <EstimationPanel estimate={estimate} target={t} model={model} onConfirm={handleConfirm} alreadyConfirmed={dossier.confirmed} />
-          </div>
+        <div className="ws-estim-layout">
+          <EstimationPanel
+            estimate={mlEstimate}
+            target={t}
+            model={model}
+            onConfirm={handleConfirm}
+            alreadyConfirmed={dossier.confirmed}
+            manualEstimate={manualEstimate}
+            prixPivot={prixPivot}
+            nFilteredRefs={filtered.length}
+          />
         </div>
       )}
     </div>

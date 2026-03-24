@@ -170,6 +170,76 @@ export function computeEstimate(features, selectedIndices, target, correctionFac
   };
 }
 
+/**
+ * computeEstimateFromRefs — same algorithm as computeEstimate but uses normalized refs
+ * (unified DVF + SeLoger data from edm.js normalizeRefs).
+ *
+ * filteredRefs:     array of { ppm2, area, price, date, source, ... }
+ * target:           { surfaceM2, rooms, type, floor, totalFloors, hasElevator, ... }
+ * correctionFactor: number — learned multiplier
+ */
+export function computeEstimateFromRefs(filteredRefs, target, correctionFactor = 1) {
+  const now = Date.now();
+
+  const comps = filteredRefs
+    .filter(r => r.ppm2 > 0 && r.area > 5)
+    .map(r => {
+      const saleTs = r.date ? new Date(r.date).getTime() : now;
+      const monthsAgo = Math.max(0, (now - saleTs) / (1000 * 60 * 60 * 24 * 30.44));
+      const weight = Math.exp(-monthsAgo / 18);
+      return { pm2: r.ppm2, weight };
+    });
+
+  if (!comps.length) return null;
+
+  const basePm2 = weightedMedian(comps.map(c => ({ value: c.pm2, weight: c.weight })));
+  if (!basePm2) return null;
+
+  const surf = target?.surfaceM2;
+  const surfAdj = surf && surf > 0
+    ? Math.max(0.80, 1 - 0.0015 * Math.max(0, surf - 50))
+    : 1;
+
+  const floorAdj  = floorElevatorFactor(target?.floor ?? null, target?.totalFloors ?? null, target?.hasElevator ?? null);
+  const orientAdj = orientationFactor(target?.orientation ?? null);
+  const amenitAdj = amenitiesFactor(target?.hasBalcony ?? null, target?.hasParking ?? null, target?.hasTerrace ?? null, target?.hasCellar ?? null);
+
+  const charAdj = floorAdj.factor * orientAdj.factor * amenitAdj.factor;
+
+  const afterSurfPm2 = basePm2 * surfAdj;
+  const adjustedPm2  = afterSurfPm2 * charAdj;
+  const correctedPm2 = adjustedPm2 * correctionFactor;
+
+  const { std } = weightedStats(comps.map(c => ({ value: c.pm2, weight: c.weight })));
+  const halfWidth = comps.length === 1 ? correctedPm2 * 0.25
+    : comps.length < 3 ? correctedPm2 * 0.20
+    : std * correctionFactor * 1.5;
+
+  const minPm2 = Math.max(correctedPm2 * 0.6, correctedPm2 - halfWidth);
+  const maxPm2 = correctedPm2 + halfWidth;
+
+  const round1k = v => Math.round(v / 1000) * 1000;
+
+  return {
+    basePm2:        Math.round(basePm2),
+    afterSurfPm2:   Math.round(afterSurfPm2),
+    adjustedPm2:    Math.round(adjustedPm2),
+    correctedPm2:   Math.round(correctedPm2),
+    minPm2:         Math.round(minPm2),
+    maxPm2:         Math.round(maxPm2),
+    estimatedPrice: surf ? round1k(correctedPm2 * surf) : null,
+    minPrice:       surf ? round1k(minPm2 * surf) : null,
+    maxPrice:       surf ? round1k(maxPm2 * surf) : null,
+    nComps:         comps.length,
+    correctionFactor,
+    surfAdj:        Math.round(surfAdj * 1000) / 1000,
+    floorAdj:       { factor: Math.round(floorAdj.factor * 1000) / 1000, label: floorAdj.label },
+    orientAdj:      { factor: Math.round(orientAdj.factor * 1000) / 1000, label: orientAdj.label },
+    amenitAdj:      { factor: Math.round(amenitAdj.factor * 1000) / 1000, label: amenitAdj.label },
+    charAdj:        Math.round(charAdj * 1000) / 1000,
+  };
+}
+
 // ─── Correction factor ────────────────────────────────────────────────────────
 
 /**
