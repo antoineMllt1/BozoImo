@@ -69,7 +69,7 @@ async function searchByPlaceId(placeId, filters = {}) {
     },
     paging: {
       page: 1,
-      size: 30,
+      size: filters.size || 30,
       order: "Default"
     }
   };
@@ -120,7 +120,7 @@ async function searchByPolyline(polyline, filters = {}) {
     },
     paging: {
       page: 1,
-      size: 30,
+      size: filters.size || 30,
       order: "Default"
     }
   };
@@ -305,120 +305,97 @@ exports.countSeloger = async (req, res) => {
  */
 exports.searchSeloger = async (req, res) => {
   try {
-    const { address, filters = {} } = req.body;
+    const { address, lat, lng, radius, filters = {} } = req.body;
+    const searchSize = filters.size || 30;
 
-    // Validation du paramètre
-    if (!address || typeof address !== 'string') {
-      return res.status(400).json({
-        error: 'Le paramètre "address" est requis et doit être une chaîne de caractères'
+    // ── Mode coordonnées : on saute l'autocomplete ────────────────────────────
+    if (lat != null && lng != null) {
+      const searchRadius = radius || 500;
+      console.log(`🔍 Recherche SeLoger par coordonnées (${lat}, ${lng}) r=${searchRadius}m (${searchSize} annonces)`);
+
+      const polyline = createCirclePolyline(lat, lng, searchRadius);
+      let searchResults = await searchByPolyline(polyline, filters);
+      let totalCount = searchResults.totalCount || 0;
+      let usedRadius = searchRadius;
+
+      // Expansion si pas assez de résultats
+      if (totalCount < searchSize && searchRadius < 5000) {
+        let r = Math.max(searchRadius, 500);
+        while (totalCount < searchSize && r <= 5000) {
+          r = Math.min(r + 500, 5000);
+          const pl = createCirclePolyline(lat, lng, r);
+          searchResults = await searchByPolyline(pl, filters);
+          totalCount = searchResults.totalCount || 0;
+          usedRadius = r;
+          if (totalCount >= searchSize) break;
+        }
+      }
+
+      console.log(`📊 ${totalCount} résultats avec r=${usedRadius}m`);
+
+      const classifiedIds = searchResults.classifieds?.map(c => c.id) || [];
+      const classifiedDetails = await getClassifiedDetails(classifiedIds);
+
+      return res.json({
+        totalCount,
+        classifieds: classifiedDetails,
+        location: { address, coordinates: { lat, lng }, radiusMeters: usedRadius },
       });
     }
 
-    console.log(`🔍 Recherche pour : ${address}`);
+    // ── Mode texte (quartier / ville) : autocomplete ──────────────────────────
+    if (!address || typeof address !== 'string') {
+      return res.status(400).json({ error: 'Fournir "address" ou "lat"+"lng"' });
+    }
 
-    // Étape 1 : Récupérer les données de localisation
-    console.log('📍 Récupération des coordonnées et de l\'ID...');
+    console.log(`🔍 Recherche SeLoger par lieu : ${address} (${searchSize} annonces)`);
+
     const locationData = await getLocationData(address);
-    
     const placeId = locationData.id;
     const coordinates = locationData.coordinates;
-    
-    // Utiliser le max_inscribed_circle comme centre si disponible, sinon centroid
     const centerLat = coordinates.max_inscribed_circle?.lat || coordinates.centroid?.lat || coordinates.lat;
     const centerLng = coordinates.max_inscribed_circle?.lng || coordinates.centroid?.lng || coordinates.lng;
 
-    console.log(`✅ ID trouvé : ${placeId}`);
-    console.log(`✅ Coordonnées : ${centerLat}, ${centerLng}`);
+    console.log(`✅ ID : ${placeId}, coords : ${centerLat}, ${centerLng}`);
 
-    // Étape 2 : Recherche par ID
-    console.log('🔎 Recherche par ID de lieu...');
     let searchResults = await searchByPlaceId(placeId, filters);
     let totalCount = searchResults.totalCount || 0;
     let usedPolyline = null;
 
-    console.log(`📊 Résultats trouvés avec l'ID : ${totalCount}`);
-
-    // Étape 3 : Si moins de 30 résultats, recherche par cercles croissants
-    if (totalCount < 30) {
-      console.log('⚠️  Moins de 30 résultats, recherche par cercles croissants...');
-      
-      let radius = 100; // Commence à 100 mètres
-      const maxRadius = 5000; // Maximum 5km
-      const radiusIncrement = 100; // Augmente de 100m à chaque fois
-      
-      while (totalCount < 30 && radius <= maxRadius) {
-        console.log(`🔄 Tentative avec un rayon de ${radius}m...`);
-        
-        // Créer un polyline circulaire
-        const polyline = createCirclePolyline(centerLat, centerLng, radius);
-        
-        // Rechercher avec ce polyline
-        searchResults = await searchByPolyline(polyline, filters);
+    if (totalCount < searchSize) {
+      let r = 100;
+      while (totalCount < searchSize && r <= 5000) {
+        const pl = createCirclePolyline(centerLat, centerLng, r);
+        searchResults = await searchByPolyline(pl, filters);
         totalCount = searchResults.totalCount || 0;
-        usedPolyline = polyline;
-        
-        console.log(`📊 Résultats avec ${radius}m : ${totalCount}`);
-        
-        if (totalCount >= 30) {
-          console.log(`✅ Au moins 30 résultats trouvés avec un rayon de ${radius}m`);
-          break;
-        }
-        
-        // Augmenter le rayon
-        radius += radiusIncrement;
-      }
-      
-      if (totalCount < 30) {
-        console.log(`⚠️  Seulement ${totalCount} résultats trouvés même avec le rayon maximum (${maxRadius}m)`);
+        usedPolyline = pl;
+        if (totalCount >= searchSize) break;
+        r += 100;
       }
     }
 
-    // Étape 4 : Récupérer les détails complets des annonces
-    console.log('📋 Récupération des détails des annonces...');
     const classifiedIds = searchResults.classifieds?.map(c => c.id) || [];
     const classifiedDetails = await getClassifiedDetails(classifiedIds);
-    
-    console.log(`✅ ${classifiedDetails.length} annonces détaillées récupérées`);
 
-    // Préparer la réponse
     const response = {
-      totalCount: totalCount,
+      totalCount,
       classifieds: classifiedDetails,
-      location: {
-        address: address,
-        placeId: placeId,
-        coordinates: {
-          lat: centerLat,
-          lng: centerLng
-        }
-      }
+      location: { address, placeId, coordinates: { lat: centerLat, lng: centerLng } },
     };
-
-    // Ajouter le polyline si utilisé
-    if (usedPolyline) {
-      response.polyline = usedPolyline;
-    }
+    if (usedPolyline) response.polyline = usedPolyline;
 
     console.log(`✅ Recherche terminée : ${totalCount} résultats`);
-    
     res.json(response);
 
   } catch (error) {
-    console.error('❌ Erreur lors de la recherche SeLoger:', error.message);
-    
-    // Gérer les erreurs spécifiques
+    console.error('❌ Erreur SeLoger:', error.message);
     if (error.response) {
-      // Erreur de réponse de l'API SeLoger
       return res.status(error.response.status || 500).json({
-        error: 'Erreur lors de la communication avec SeLoger',
-        details: error.response.data || error.message
+        error: 'Erreur communication SeLoger',
+        details: error.response.data || error.message,
       });
     }
-    
-    res.status(500).json({
-      error: 'Erreur lors de la recherche',
-      details: error.message
-    });
+    res.status(500).json({ error: 'Erreur lors de la recherche', details: error.message });
   }
 };
 
