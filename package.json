@@ -3,17 +3,52 @@
   "version": "1.0.0",
   "private": true,
   "description": "Estimia — Recherche immobilière intelligente",
+  "main": "electron/main.js",
   "scripts": {
     "dev": "concurrently -k -p \"[{name}]\" -n \"API,APP\" -c \"magenta.bold,cyan.bold\" \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
     "build": "npm --prefix frontend run build",
     "start": "npm --prefix backend start",
-    "setup": "npm install && npm --prefix backend install && npm --prefix frontend install"
+    "setup": "npm install && npm --prefix backend install && npm --prefix frontend install",
+    "electron:dev": "concurrently -k -p \"[{name}]\" -n \"API,APP,ELECTRON\" -c \"magenta.bold,cyan.bold,yellow.bold\" \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:build": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:mac": "npm run build && electron-builder --mac"
   },
   "dependencies": {
-    "axios": "^1.13.2"
+    "axios": "^1.13.2",
+    "cors": "^2.8.5",
+    "express": "^5.1.0"
   },
   "devDependencies": {
     "baseline-browser-mapping": "^2.10.10",
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.estimia.app",
+    "productName": "Estimia",
+    "asar": false,
+    "files": [
+      "electron/**/*",
+      "backend/**/*",
+      "frontend/dist/**/*",
+      "package.json",
+      "!backend/node_modules/**/*"
+    ],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "frontend/public/favicon.ico"
+    },
+    "mac": {
+      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }],
+      "icon": "frontend/public/favicon.ico",
+      "category": "public.app-category.business"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

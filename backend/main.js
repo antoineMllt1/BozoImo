@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const apiRoutes = require('./routes');
 
 const app = express();
@@ -18,6 +19,13 @@ app.use((req, res, next) => {
 
 // Routes de l'API
 app.use('/api', apiRoutes);
+
+// ── Electron production: serve built frontend ──────────────────────────────────
+if (process.env.ELECTRON_STATIC === 'true') {
+  const distPath = path.join(__dirname, '..', 'frontend', 'dist');
+  app.use(express.static(distPath));
+  app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
+}
 
 // Route racine
 app.get('/', (req, res) => {
