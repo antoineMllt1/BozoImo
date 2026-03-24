@@ -1,0 +1,9 @@
+backend/node_modules
+frontend/node_modules
+node_modules
+backend/*.md
+*.md
+seloger/
+backend/test-*.js
+backend/exemple-*.js
+backend/*.http
