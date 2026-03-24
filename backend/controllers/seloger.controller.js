@@ -14,13 +14,13 @@ async function scraperRequest(config) {
     api_key:      key,
     url:          config.url,
     country_code: 'fr',
-    keep_headers: 'true',
+    render:       'true',
   });
   return axios({
     method:  config.method || 'get',
     url:     `https://api.scraperapi.com/?${params}`,
     data:    config.data,
-    headers: { ...config.headers },
+    headers: { 'Content-Type': 'application/json' },
     timeout: config.timeout || 25000,
   });
 }
@@ -64,7 +64,7 @@ async function getLocationData(text) {
     url: 'https://www.seloger.com/search-mfe-bff/autocomplete',
     headers: DEFAULT_HEADERS,
     data: JSON.stringify(data),
-    timeout: process.env.SCRAPER_API_KEY ? 25000 : 7000
+    timeout: process.env.SCRAPER_API_KEY ? 55000 : 7000
   };
 
   const response = await scraperRequest(config);
@@ -121,7 +121,7 @@ async function searchByPlaceId(placeId, filters = {}) {
     url: 'https://www.seloger.com/serp-bff/search',
     headers: DEFAULT_HEADERS,
     data: JSON.stringify(data),
-    timeout: process.env.SCRAPER_API_KEY ? 25000 : 7000
+    timeout: process.env.SCRAPER_API_KEY ? 55000 : 7000
   };
 
   const response = await scraperRequest(config);
@@ -173,7 +173,7 @@ async function searchByPolyline(polyline, filters = {}) {
     url: 'https://www.seloger.com/serp-bff/search',
     headers: DEFAULT_HEADERS,
     data: JSON.stringify(data),
-    timeout: process.env.SCRAPER_API_KEY ? 25000 : 7000
+    timeout: process.env.SCRAPER_API_KEY ? 55000 : 7000
   };
 
   const response = await scraperRequest(config);
