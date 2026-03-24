@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import './App.css';
 import './styles/additions.css';
 import { loadDossiers, saveDossiers, loadModel } from './utils/storage';
-import { computeEstimate } from './utils/model';
+import { computeEstimate, computeEstimateFromRefs } from './utils/model';
+import { normalizeRefs, applyFilters } from './utils/edm';
 import { modelStats } from './utils/model';
 import { fmtPm2 } from './utils/formatters';
 import HomeView       from './components/HomeView';
@@ -39,13 +40,18 @@ export default function App() {
   const handleUpdate = useCallback((updated) => {
     setDossiers(prev => prev.map(d => {
       if (d.id !== updated.id) return d;
-      const features = updated.dvfSnapshot?.data?.features || [];
-      const lastEstimate = computeEstimate(
-        features,
-        updated.selectedComps,
-        updated.target,
-        model.correctionFactor
-      );
+      // Compute estimate from filtered refs (new unified pipeline)
+      const allRefs = normalizeRefs(updated.dvfSnapshot, updated.selogerSnapshot, 0.05);
+      const refs = allRefs.map(r => ({ ...r, excluded: updated.analystExclusions?.[r.id] || false }));
+      const filteredRefs = applyFilters(refs, updated.analystFilters || {});
+      const lastEstimate = filteredRefs.length > 0
+        ? computeEstimateFromRefs(filteredRefs, updated.target, model.correctionFactor)
+        : computeEstimate(
+            updated.dvfSnapshot?.data?.features || [],
+            updated.selectedComps || [],
+            updated.target,
+            model.correctionFactor
+          );
       return { ...updated, lastEstimate };
     }));
   }, [model.correctionFactor]);

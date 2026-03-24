@@ -1,0 +1,35 @@
+# Railway build config — installe Chromium pour puppeteer (SeLoger)
+[phases.setup]
+nixPkgs = [
+  "nodejs_20",
+  "chromium",
+  "nss",
+  "atk",
+  "cups",
+  "libdrm",
+  "mesa",
+  "libxkbcommon",
+  "xorg.libXcomposite",
+  "xorg.libXdamage",
+  "xorg.libXext",
+  "xorg.libXrandr",
+  "xorg.libxcb",
+  "pango",
+  "cairo",
+  "alsa-lib",
+  "at-spi2-atk",
+  "gtk3",
+]
+
+[phases.install]
+cmds = []
+
+[phases.build]
+cmds = [
+  "npm install --prefix backend",
+  "npm install --prefix frontend",
+  "npm run build --prefix frontend",
+]
+
+[start]
+cmd = "node backend/main.js"

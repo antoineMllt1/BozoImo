@@ -87,23 +87,23 @@ export default function HomeView({ dossiers, model, onNew, onScrape, onOpen, onD
         <div className="home-empty">
           <div className="home-empty-grid">
             <div className="he-card">
-              <span>📍</span>
+              <div className="he-step-num">1</div>
               <h4>Saisissez une adresse</h4>
               <p>Entrez l&apos;adresse exacte du bien à analyser et choisissez le rayon de recherche.</p>
             </div>
             <div className="he-card">
-              <span>📊</span>
-              <h4>Collectez les données</h4>
-              <p>L&apos;outil extrait les offres actives (SeLoger) et les ventes passées (DVF) autour du bien.</p>
+              <div className="he-step-num">2</div>
+              <h4>Étude de marché</h4>
+              <p>L&apos;outil extrait et analyse les transactions DVF et annonces SeLoger autour du bien.</p>
             </div>
             <div className="he-card">
-              <span>🧮</span>
-              <h4>Obtenez une estimation</h4>
-              <p>Sélectionnez les comparables pertinents — l&apos;algorithme calcule une fourchette de prix.</p>
+              <div className="he-step-num">3</div>
+              <h4>Grille de prix</h4>
+              <p>Valorisez chaque lot avec les coefficients (étage, DPE, vue, état…) — comme dans votre Excel.</p>
             </div>
             <div className="he-card">
-              <span>🎯</span>
-              <h4>Affinez le modèle</h4>
+              <div className="he-step-num">4</div>
+              <h4>Confirmez & affinez</h4>
               <p>Confirmez le prix réel après la transaction pour améliorer les estimations futures.</p>
             </div>
           </div>

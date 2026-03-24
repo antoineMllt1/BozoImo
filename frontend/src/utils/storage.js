@@ -39,6 +39,82 @@ export function saveModel(model) {
   catch { /* ignore — not critical */ }
 }
 
+// ─── SeLoger classified strip ─────────────────────────────────────────────────
+
+function _toStr(v) {
+  if (typeof v === 'string') return v.toLowerCase();
+  if (typeof v === 'number') return String(v);
+  if (v && typeof v === 'object' && typeof v.value === 'string') return v.value.toLowerCase();
+  return '';
+}
+
+function _kfNum(kf, kw) {
+  const hit = kf.find(f => f.includes(kw));
+  if (!hit) return null;
+  const m = hit.match(/(\d+[\.,]?\d*)/);
+  return m ? parseFloat(m[1].replace(',', '.')) : null;
+}
+
+function _parsePrice(str) {
+  if (!str) return null;
+  const digits = str.replace(/\s/g, '').match(/\d+/g);
+  if (!digits) return null;
+  return parseInt(digits.join(''), 10) || null;
+}
+
+export function stripSelogerClassified(c) {
+  const rawKf = Array.isArray(c.hardFacts?.keyfacts) ? c.hardFacts.keyfacts : [];
+  const kf    = rawKf.map(_toStr).filter(Boolean);
+  const tags  = (Array.isArray(c.tags) ? c.tags : Array.isArray(c.features) ? c.features : []).map(_toStr).filter(Boolean);
+  const all   = [...kf, ...tags];
+
+  // Floor
+  let floor = null;
+  for (const k of all) {
+    const m = k.match(/[ée]tage\s+(\d+)/) || k.match(/^(\d+)\s*(?:er|ère|ème|e)\s+[ée]tage/i);
+    if (m) { floor = parseInt(m[1], 10); break; }
+  }
+
+  // Orientation
+  const ORI = { 'sud-ouest':'SW','sud-est':'SE','nord-ouest':'NW','nord-est':'NE', sud:'S',nord:'N',est:'E',ouest:'W' };
+  let orientation = null;
+  outer: for (const k of all) for (const [w, code] of Object.entries(ORI)) if (k.includes(w)) { orientation = code; break outer; }
+
+  const has = (...ws) => all.some(k => ws.some(w => k.includes(w)));
+  const loc = c.location?.address || {};
+
+  const s = {
+    title:    c.hardFacts?.title    || '',
+    price:    _parsePrice(c.hardFacts?.price?.value),
+    ppm2:     _parsePrice(c.hardFacts?.price?.additionalInformation),
+    area:     _kfNum(kf, 'm²'),
+    rooms:    _kfNum(kf, 'pièce'),
+    city:     loc.city     || '',
+    zip:      loc.zipCode  || '',
+    district: loc.district || '',
+    agency:   c.provider?.intermediaryCard?.title || '',
+    url:      c.url || '',
+  };
+
+  // Optional — only include when present to save space
+  const bedrooms = _kfNum(kf, 'chambre');
+  if (bedrooms != null)                          s.bedrooms    = bedrooms;
+  if (floor != null)                             s.floor       = floor;
+  if (orientation)                               s.orientation = orientation;
+  if (has('ascenseur', 'elevator'))              s.hasElevator = true;
+  if (has('balcon', 'balcony'))                  s.hasBalcony  = true;
+  if (has('terrasse', 'terrace'))                s.hasTerrace  = true;
+  if (has('parking', 'garage', 'box'))           s.hasParking  = true;
+  if (has('cave', 'cellar'))                     s.hasCellar   = true;
+
+  return s;
+}
+
+export function stripSelogerSnapshot(data) {
+  if (!data?.classifieds) return data;
+  return { ...data, classifieds: data.classifieds.map(stripSelogerClassified) };
+}
+
 // ─── DVF feature strip ────────────────────────────────────────────────────────
 // Keep only what's needed for display + estimation to save localStorage space
 
