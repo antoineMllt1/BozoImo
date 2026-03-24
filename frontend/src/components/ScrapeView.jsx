@@ -5,6 +5,13 @@ import DvfTable     from './DvfTable';
 import SelogerTable from './SelogerTable';
 
 const METERS_PER_DEG_LAT = 111320;
+
+async function safeJson(r) {
+  const text = await r.text();
+  if (!text) throw new Error('Réponse vide — service indisponible ou délai dépassé');
+  try { return JSON.parse(text); }
+  catch { throw new Error('Réponse non valide du serveur'); }
+}
 function radiusToBounds(lat, lng, r) {
   const dLat = r / METERS_PER_DEG_LAT;
   const dLng = r / (METERS_PER_DEG_LAT * Math.cos(lat * Math.PI / 180));
@@ -71,7 +78,7 @@ export default function ScrapeView({ onBack }) {
                 ? ['ITEM_TYPE.APARTMENT']
                 : ['ITEM_TYPE.HOUSE', 'ITEM_TYPE.APARTMENT'],
           }),
-        }).then(r => r.json()).then(d => ({ src: 'dvf', d })).catch(e => ({ src: 'dvf', err: e.message }))
+        }).then(safeJson).then(d => ({ src: 'dvf', d })).catch(e => ({ src: 'dvf', err: e.message }))
       );
     }
     if (sources.seloger) {
@@ -79,7 +86,7 @@ export default function ScrapeView({ onBack }) {
         fetch('/api/seloger/search', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ lat, lng, radius, filters: { size: pageSize } }),
-        }).then(r => r.json()).then(d => ({ src: 'seloger', d })).catch(e => ({ src: 'seloger', err: e.message }))
+        }).then(safeJson).then(d => ({ src: 'seloger', d })).catch(e => ({ src: 'seloger', err: e.message }))
       );
     }
 

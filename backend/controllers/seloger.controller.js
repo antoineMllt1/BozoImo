@@ -39,7 +39,8 @@ async function getLocationData(text) {
     maxBodyLength: Infinity,
     url: 'https://www.seloger.com/search-mfe-bff/autocomplete',
     headers: DEFAULT_HEADERS,
-    data: JSON.stringify(data)
+    data: JSON.stringify(data),
+    timeout: 7000
   };
 
   const response = await axios.request(config);
@@ -95,7 +96,8 @@ async function searchByPlaceId(placeId, filters = {}) {
     maxBodyLength: Infinity,
     url: 'https://www.seloger.com/serp-bff/search',
     headers: DEFAULT_HEADERS,
-    data: JSON.stringify(data)
+    data: JSON.stringify(data),
+    timeout: 7000
   };
 
   const response = await axios.request(config);
@@ -146,7 +148,8 @@ async function searchByPolyline(polyline, filters = {}) {
     maxBodyLength: Infinity,
     url: 'https://www.seloger.com/serp-bff/search',
     headers: DEFAULT_HEADERS,
-    data: JSON.stringify(data)
+    data: JSON.stringify(data),
+    timeout: 7000
   };
 
   const response = await axios.request(config);
