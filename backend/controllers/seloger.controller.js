@@ -321,11 +321,13 @@ exports.searchSeloger = async (req, res) => {
       let totalCount = searchResults.totalCount || 0;
       let usedRadius = searchRadius;
 
-      // Expansion si pas assez de résultats
+      // Expansion si pas assez de résultats (max 3 tentatives)
       if (totalCount < searchSize && searchRadius < 5000) {
         let r = Math.max(searchRadius, 500);
-        while (totalCount < searchSize && r <= 5000) {
+        let attempts = 0;
+        while (totalCount < searchSize && r <= 5000 && attempts < 3) {
           r = Math.min(r + 500, 5000);
+          attempts++;
           const pl = createCirclePolyline(lat, lng, r);
           searchResults = await searchByPolyline(pl, filters);
           totalCount = searchResults.totalCount || 0;
@@ -366,14 +368,16 @@ exports.searchSeloger = async (req, res) => {
     let usedPolyline = null;
 
     if (totalCount < searchSize) {
-      let r = 100;
-      while (totalCount < searchSize && r <= 5000) {
+      let r = 500;
+      let attempts = 0;
+      while (totalCount < searchSize && r <= 5000 && attempts < 3) {
+        r = Math.min(r + 500, 5000);
+        attempts++;
         const pl = createCirclePolyline(centerLat, centerLng, r);
         searchResults = await searchByPolyline(pl, filters);
         totalCount = searchResults.totalCount || 0;
         usedPolyline = pl;
         if (totalCount >= searchSize) break;
-        r += 100;
       }
     }
 
