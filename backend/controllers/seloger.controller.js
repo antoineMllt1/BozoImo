@@ -10,12 +10,17 @@ async function scraperRequest(config) {
   const key = process.env.SCRAPER_API_KEY;
   if (!key) return axios.request(config);
 
-  const url = `https://api.scraperapi.com/?api_key=${key}&url=${encodeURIComponent(config.url)}&keep_headers=true`;
+  const params = new URLSearchParams({
+    api_key:      key,
+    url:          config.url,
+    country_code: 'fr',
+    keep_headers: 'true',
+  });
   return axios({
-    method: config.method || 'get',
-    url,
-    data: config.data,
-    headers: { 'Content-Type': 'application/json' },
+    method:  config.method || 'get',
+    url:     `https://api.scraperapi.com/?${params}`,
+    data:    config.data,
+    headers: { ...config.headers },
     timeout: config.timeout || 25000,
   });
 }
