@@ -9,10 +9,10 @@
     "build": "npm --prefix frontend run build",
     "start": "npm --prefix backend start",
     "setup": "npm install && npm --prefix backend install && npm --prefix frontend install",
-    "electron:dev": "concurrently -k -p \"[{name}]\" -n \"API,APP,ELECTRON\" -c \"magenta.bold,cyan.bold,yellow.bold\" \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "npm run build && electron-builder",
-    "dist:win": "npm run build && electron-builder --win",
-    "dist:mac": "npm run build && electron-builder --mac"
+    "electron:dev": "concurrently -k -p \"[{name}]\" -n \"API,APP,ELECTRON\" -c \"magenta.bold,cyan.bold,yellow.bold\" \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\" \"wait-on http://localhost:5173 && npx electron .\"",
+    "electron:build": "npm run build && npx electron-builder",
+    "dist:win": "npm run build && npx electron-builder --win",
+    "dist:mac": "npm run build && npx electron-builder --mac"
   },
   "dependencies": {
     "axios": "^1.13.2",
