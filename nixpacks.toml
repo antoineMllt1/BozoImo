@@ -1,6 +1,7 @@
 # Railway build config — installe Chromium pour puppeteer (SeLoger)
 [phases.setup]
 nixPkgs = [
+  "nodejs_20",
   "chromium",
   "nss",
   "atk",
