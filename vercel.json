@@ -4,7 +4,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://REMPLACER_PAR_URL_RAILWAY/api/:path*"
+      "destination": "https://bozoimo-production.up.railway.app/api/:path*"
     },
     {
       "source": "/((?!api/).*)",
