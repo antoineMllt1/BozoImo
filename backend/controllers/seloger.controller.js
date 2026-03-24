@@ -10,7 +10,9 @@ let _sessionReady = false;
 const CHROME_PATHS = [
   // Env var override (Railway: set CHROME_EXECUTABLE=/usr/bin/chromium)
   process.env.CHROME_EXECUTABLE,
-  // Linux — nixpkgs / Railway
+  // Linux — nixpkgs / Railway (nix profile)
+  '/root/.nix-profile/bin/chromium',
+  '/nix/var/nix/profiles/default/bin/chromium',
   '/usr/bin/chromium',
   '/usr/bin/chromium-browser',
   '/usr/bin/google-chrome-stable',
@@ -29,6 +31,16 @@ function findBrowser() {
   for (const p of CHROME_PATHS) {
     try { if (fs.existsSync(p)) return p; } catch (_) {}
   }
+  // Fallback: try `which chromium` or `which chromium-browser`
+  try {
+    const { execSync } = require('child_process');
+    for (const bin of ['chromium', 'chromium-browser', 'google-chrome']) {
+      try {
+        const p = execSync(`which ${bin}`, { encoding: 'utf8' }).trim();
+        if (p && fs.existsSync(p)) return p;
+      } catch (_) {}
+    }
+  } catch (_) {}
   return null;
 }
 
