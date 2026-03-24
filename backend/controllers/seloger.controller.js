@@ -1,85 +1,82 @@
 const axios = require('axios');
+const fs = require('fs');
 const { createCirclePolyline } = require('../utils/polyline');
 
-// Use electron.net when available (Electron desktop app).
-// It routes through Chromium's network stack → real Chrome TLS fingerprint
-// → SeLoger cannot distinguish from a real browser.
-let electronNet = null;
-try {
-  const electron = require('electron');
-  electronNet = electron.net;
-} catch (_) { /* not running inside Electron — use axios */ }
+// ── Puppeteer session (cached Chrome browser for DataDome bypass) ──────────────
+let _browser = null;
+let _page    = null;
+let _sessionReady = false;
 
-/**
- * Make an HTTP request using the best available method:
- *   1. electron.net  — Chromium TLS fingerprint (Electron desktop)
- *   2. ScraperAPI    — residential IP proxy (Vercel / server)
- *   3. axios direct  — local dev only
- */
-function makeRequest(config) {
-  if (electronNet) return electronNetRequest(config);
-  return scraperRequest(config);
+const CHROME_PATHS = [
+  process.env.LOCALAPPDATA + '\\Google\\Chrome\\Application\\chrome.exe',
+  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+  'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+  process.env.LOCALAPPDATA + '\\Microsoft\\Edge\\Application\\msedge.exe',
+  'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+  'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+].filter(Boolean);
+
+function findBrowser() {
+  for (const p of CHROME_PATHS) {
+    try { if (fs.existsSync(p)) return p; } catch (_) {}
+  }
+  return null;
 }
 
-function electronNetRequest(config) {
-  return new Promise((resolve, reject) => {
-    const req = electronNet.request({
-      method: (config.method || 'GET').toUpperCase(),
-      url:    config.url,
-    });
+async function getPage() {
+  if (_page && _sessionReady) return _page;
 
-    if (config.headers) {
-      for (const [k, v] of Object.entries(config.headers)) req.setHeader(k, v);
-    }
+  const executablePath = findBrowser();
+  if (!executablePath) throw new Error('Chrome/Edge introuvable — installez Chrome pour utiliser SeLoger');
 
-    const timeout = config.timeout || 15000;
-    const timer = setTimeout(() => {
-      req.abort();
-      reject(new Error('electron.net request timed out'));
-    }, timeout);
-
-    req.on('response', (res) => {
-      const chunks = [];
-      res.on('data', chunk => chunks.push(chunk));
-      res.on('end', () => {
-        clearTimeout(timer);
-        const body = Buffer.concat(chunks).toString();
-        if (res.statusCode >= 400) {
-          const err = new Error(`SeLoger responded with ${res.statusCode}`);
-          err.response = { status: res.statusCode, data: body };
-          return reject(err);
-        }
-        try { resolve({ data: JSON.parse(body) }); }
-        catch { reject(new Error('SeLoger returned non-JSON response')); }
-      });
-    });
-
-    req.on('error', (err) => { clearTimeout(timer); reject(err); });
-
-    if (config.data) {
-      req.write(typeof config.data === 'string' ? config.data : JSON.stringify(config.data));
-    }
-    req.end();
+  const puppeteer = require('puppeteer-core');
+  _browser = await puppeteer.launch({
+    executablePath,
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled'],
+    ignoreDefaultArgs: ['--enable-automation'],
   });
+
+  _page = await _browser.newPage();
+  await _page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
+  await _page.setExtraHTTPHeaders({ 'accept-language': 'fr-FR,fr;q=0.9' });
+
+  // Visit SeLoger to obtain the DataDome cookie
+  await _page.goto('https://www.seloger.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  _sessionReady = true;
+
+  _browser.on('disconnected', () => { _browser = null; _page = null; _sessionReady = false; });
+  return _page;
 }
 
-function scraperRequest(config) {
-  const key = process.env.SCRAPER_API_KEY;
-  if (!key) return axios.request(config);
+async function makeRequest(config) {
+  const page = await getPage();
+  const method = (config.method || 'GET').toUpperCase();
+  const body   = config.data ? (typeof config.data === 'string' ? config.data : JSON.stringify(config.data)) : undefined;
 
-  const params = new URLSearchParams({
-    api_key:      key,
-    url:          config.url,
-    country_code: 'fr',
-    render:       'true',
-  });
-  return axios({
-    method:  config.method || 'get',
-    url:     `https://api.scraperapi.com/?${params}`,
-    data:    config.data,
-    headers: { 'Content-Type': 'application/json' },
-    timeout: config.timeout || 25000,
-  });
+  const result = await page.evaluate(async (url, method, body) => {
+    const res = await fetch(url, {
+      method,
+      headers: {
+        'accept':       'application/json, text/plain, */*',
+        'content-type': 'application/json',
+        'origin':       'https://www.seloger.com',
+        'referer':      'https://www.seloger.com/',
+      },
+      body,
+      credentials: 'include',
+    });
+    const text = await res.text();
+    return { status: res.status, text };
+  }, config.url, method, body);
+
+  if (result.status >= 400) {
+    const err = new Error(`SeLoger responded with ${result.status}`);
+    err.response = { status: result.status, data: result.text };
+    throw err;
+  }
+
+  return { data: JSON.parse(result.text) };
 }
 
 /**
@@ -121,7 +118,7 @@ async function getLocationData(text) {
     url: 'https://www.seloger.com/search-mfe-bff/autocomplete',
     headers: DEFAULT_HEADERS,
     data: JSON.stringify(data),
-    timeout: process.env.SCRAPER_API_KEY ? 55000 : 7000
+    timeout: 20000
   };
 
   const response = await makeRequest(config);
@@ -178,7 +175,7 @@ async function searchByPlaceId(placeId, filters = {}) {
     url: 'https://www.seloger.com/serp-bff/search',
     headers: DEFAULT_HEADERS,
     data: JSON.stringify(data),
-    timeout: process.env.SCRAPER_API_KEY ? 55000 : 7000
+    timeout: 20000
   };
 
   const response = await makeRequest(config);
@@ -230,7 +227,7 @@ async function searchByPolyline(polyline, filters = {}) {
     url: 'https://www.seloger.com/serp-bff/search',
     headers: DEFAULT_HEADERS,
     data: JSON.stringify(data),
-    timeout: process.env.SCRAPER_API_KEY ? 55000 : 7000
+    timeout: 20000
   };
 
   const response = await makeRequest(config);

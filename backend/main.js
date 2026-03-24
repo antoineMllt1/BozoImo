@@ -24,7 +24,7 @@ app.use('/api', apiRoutes);
 if (process.env.ELECTRON_STATIC === 'true') {
   const distPath = path.join(__dirname, '..', 'frontend', 'dist');
   app.use(express.static(distPath));
-  app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
+  app.get('/{*path}', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
 }
 
 // Route racine
