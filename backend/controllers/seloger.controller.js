@@ -2,6 +2,25 @@ const axios = require('axios');
 const { createCirclePolyline } = require('../utils/polyline');
 
 /**
+ * Proxy SeLoger requests through ScraperAPI when SCRAPER_API_KEY is set.
+ * ScraperAPI uses residential IPs — SeLoger doesn't block them.
+ * Without the key (local dev), requests go directly.
+ */
+async function scraperRequest(config) {
+  const key = process.env.SCRAPER_API_KEY;
+  if (!key) return axios.request(config);
+
+  const url = `https://api.scraperapi.com/?api_key=${key}&url=${encodeURIComponent(config.url)}&keep_headers=true`;
+  return axios({
+    method: config.method || 'get',
+    url,
+    data: config.data,
+    headers: { 'Content-Type': 'application/json' },
+    timeout: config.timeout || 25000,
+  });
+}
+
+/**
  * Headers par défaut pour les requêtes SeLoger
  */
 const DEFAULT_HEADERS = {
@@ -40,10 +59,10 @@ async function getLocationData(text) {
     url: 'https://www.seloger.com/search-mfe-bff/autocomplete',
     headers: DEFAULT_HEADERS,
     data: JSON.stringify(data),
-    timeout: 7000
+    timeout: process.env.SCRAPER_API_KEY ? 25000 : 7000
   };
 
-  const response = await axios.request(config);
+  const response = await scraperRequest(config);
   
   if (!response.data || response.data.length === 0) {
     throw new Error('Aucun résultat trouvé pour cette adresse');
@@ -97,10 +116,10 @@ async function searchByPlaceId(placeId, filters = {}) {
     url: 'https://www.seloger.com/serp-bff/search',
     headers: DEFAULT_HEADERS,
     data: JSON.stringify(data),
-    timeout: 7000
+    timeout: process.env.SCRAPER_API_KEY ? 25000 : 7000
   };
 
-  const response = await axios.request(config);
+  const response = await scraperRequest(config);
   return response.data;
 }
 
@@ -149,10 +168,10 @@ async function searchByPolyline(polyline, filters = {}) {
     url: 'https://www.seloger.com/serp-bff/search',
     headers: DEFAULT_HEADERS,
     data: JSON.stringify(data),
-    timeout: 7000
+    timeout: process.env.SCRAPER_API_KEY ? 25000 : 7000
   };
 
-  const response = await axios.request(config);
+  const response = await scraperRequest(config);
   return response.data;
 }
 
@@ -181,7 +200,7 @@ async function getClassifiedDetails(classifiedIds) {
   };
 
   try {
-    const response = await axios.request(config);
+    const response = await scraperRequest(config);
     return response.data;
   } catch (error) {
     console.error('Erreur lors de la récupération des détails:', error.message);
@@ -236,7 +255,7 @@ async function countResults(placeId, polyline, filters = {}) {
     data: JSON.stringify(data)
   };
 
-  const response = await axios.request(config);
+  const response = await scraperRequest(config);
   return response.data;
 }
 
