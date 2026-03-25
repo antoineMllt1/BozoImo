@@ -9,13 +9,21 @@ export const fmtK = v => {
 export const fmtPm2 = v =>
   v ? `${Math.round(v).toLocaleString('fr-FR')} €/m²` : '—';
 
+export const fmtPrice = v => {
+  const n = Number(v);
+  if (!n) return '—';
+  return `${Math.round(n).toLocaleString('fr-FR')} €`;
+};
+
 export const fmtDate = s => {
   if (!s) return '—';
   try {
     return new Date(s).toLocaleDateString('fr-FR', {
       year: 'numeric', month: 'short', day: 'numeric',
     });
-  } catch { return s; }
+  } catch {
+    return s;
+  }
 };
 
 export const isoToday = () => new Date().toISOString().slice(0, 10);

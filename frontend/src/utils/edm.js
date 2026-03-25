@@ -1,3 +1,5 @@
+import { inferPropertyType, matchesTargetPropertyType } from './propertyType';
+
 // EDM — Étude De Marché calculations
 
 function roomsToType(n) {
@@ -25,19 +27,31 @@ export function normalizeRefs(dvfSnapshot, selogerSnapshot, tauxNego = 0.05) {
     const p = f.properties || {};
     const area  = p.area || null;
     const price = p.updated_price || null;
+    const lng = Array.isArray(f.geometry?.coordinates) ? Number(f.geometry.coordinates[0]) : null;
+    const lat = Array.isArray(f.geometry?.coordinates) ? Number(f.geometry.coordinates[1]) : null;
     refs.push({
       id: `dvf_${i}`,
       source: 'dvf',
       address: p.address_name || '',
       date: p.sale_at || null,
       type: roomsToType(p.room_count),
+      propertyType: inferPropertyType(p.item_type, p.itemType, p.propertyType, p.type),
       area,
       floor: p.floor_number ?? null,
       dpe: null,
       orientation: null,
+      condition: null,
+      viewQuality: null,
+      yearBuilt: null,
+      hasPool: false,
+      hasGarden: false,
+      isDuplex: false,
+      nbLots: p.nb_lots ?? null,
       price,
       ppm2: area > 0 && price ? Math.round(price / area) : null,
       keywords: [],
+      lat: Number.isFinite(lat) ? lat : null,
+      lng: Number.isFinite(lng) ? lng : null,
       excluded: false,
       url: null,
     });
@@ -53,15 +67,25 @@ export function normalizeRefs(dvfSnapshot, selogerSnapshot, tauxNego = 0.05) {
       address: [c.district, c.city && c.zip ? `${c.city} (${c.zip})` : c.city].filter(Boolean).join(', '),
       date: fetchedAt,
       type: roomsToType(c.rooms),
+      propertyType: inferPropertyType(c.propertyType, c.estateType, c.realEstateType, c.title, c.keywords),
       area: c.area || null,
       floor: c.floor ?? null,
       dpe: c.dpe || null,
       orientation: c.orientation || null,
+      condition: c.condition || null,
+      viewQuality: c.viewQuality || null,
+      yearBuilt: c.yearBuilt ?? null,
+      hasPool: c.hasPool === true,
+      hasGarden: c.hasGarden === true,
+      isDuplex: c.isDuplex === true,
+      nbLots: c.nbLots ?? null,
       price:    rawPrice ? Math.round(rawPrice * (1 - tauxNego)) : null,
       ppm2:     rawPpm2  ? Math.round(rawPpm2  * (1 - tauxNego)) : null,
       priceRaw: rawPrice,
       ppm2Raw:  rawPpm2,
       keywords: c.keywords || [],
+      lat: Number.isFinite(Number(c.lat)) ? Number(c.lat) : null,
+      lng: Number.isFinite(Number(c.lng)) ? Number(c.lng) : null,
       excluded: false,
       url: c.url || null,
     });
@@ -70,10 +94,11 @@ export function normalizeRefs(dvfSnapshot, selogerSnapshot, tauxNego = 0.05) {
   return refs;
 }
 
-export function applyFilters(refs, filters = {}) {
+export function applyFilters(refs, filters = {}, targetType = null) {
   return refs.filter(r => {
     if (r.excluded) return false;
     if (r.ppm2 == null) return false;
+    if (!matchesTargetPropertyType(r, targetType)) return false;
     if (filters.sources?.length && !filters.sources.includes(r.source)) return false;
     if (filters.ppm2Min != null && r.ppm2 < filters.ppm2Min) return false;
     if (filters.ppm2Max != null && r.ppm2 > filters.ppm2Max) return false;
@@ -90,7 +115,7 @@ export function applyFilters(refs, filters = {}) {
   });
 }
 
-export function computeMetrics(allRefs, filteredRefs, filters = {}, tauxNego = 0.05, temporalSettings = null) {
+export function computeMetrics(allRefs, filteredRefs, filters = {}, tauxNego = 0.05, temporalSettings = null, sourceWeights = null) {
   const n = filteredRefs.length;
   const ppm2s = filteredRefs.map(r => r.ppm2).filter(v => v != null);
   if (!ppm2s.length) return null;
@@ -98,10 +123,15 @@ export function computeMetrics(allRefs, filteredRefs, filters = {}, tauxNego = 0
   const now = new Date();
   const avg = ppm2s.reduce((a, b) => a + b, 0) / ppm2s.length;
 
+  // Source weights: { dvf: 1.0, seloger: 0.8 } etc.
+  const sw = sourceWeights || { dvf: 1, seloger: 1 };
+
   let sumPrice = 0, sumArea = 0;
   filteredRefs.forEach(r => {
     if (!r.ppm2 || !r.area) return;
-    const w = temporalWeight(r.date, now, temporalSettings);
+    const tw = temporalWeight(r.date, now, temporalSettings);
+    const srcW = sw[r.source] ?? 1;
+    const w = tw * srcW;
     sumPrice += (r.price || r.ppm2 * r.area) * w;
     sumArea  += r.area * w;
   });
@@ -118,13 +148,18 @@ export function computeMetrics(allRefs, filteredRefs, filters = {}, tauxNego = 0
     ? Math.round(slRefs.reduce((a, r) => a + r.ppm2Raw, 0) / slRefs.length * (1 - tauxNego))
     : null;
 
-  // Per-type stats
+  // Per-type stats (with source weighting)
   const byType = {};
   ['T1','T2','T3','T4','T5'].forEach(t => {
     const tr = filteredRefs.filter(r => r.type === t && r.ppm2);
     if (!tr.length) return;
     let sp = 0, sa = 0;
-    tr.forEach(r => { if (r.area) { sp += r.price || r.ppm2 * r.area; sa += r.area; } });
+    tr.forEach(r => {
+      if (!r.area) return;
+      const srcW = sw[r.source] ?? 1;
+      sp += (r.price || r.ppm2 * r.area) * srcW;
+      sa += r.area * srcW;
+    });
     byType[t] = {
       n: tr.length,
       avg: Math.round(tr.reduce((a, r) => a + r.ppm2, 0) / tr.length),

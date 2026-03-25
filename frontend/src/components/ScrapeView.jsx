@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { RADIUS_OPTIONS } from '../utils/constants';
 import { stripDvfSnapshot, stripSelogerSnapshot } from '../utils/storage';
+import { estateTypesForTargetType, itemTypesForTargetType } from '../utils/propertyType';
 import DvfTable     from './DvfTable';
 import SelogerTable from './SelogerTable';
 
@@ -72,11 +73,7 @@ export default function ScrapeView({ onBack }) {
           body: JSON.stringify({
             bounds: radiusToBounds(lat, lng, radius),
             roomCount: [],
-            itemTypes: type === 'House'
-              ? ['ITEM_TYPE.HOUSE']
-              : type === 'Apartment'
-                ? ['ITEM_TYPE.APARTMENT']
-                : ['ITEM_TYPE.HOUSE', 'ITEM_TYPE.APARTMENT'],
+            itemTypes: itemTypesForTargetType(type),
           }),
         }).then(safeJson).then(d => ({ src: 'dvf', d })).catch(e => ({ src: 'dvf', err: e.message }))
       );
@@ -85,7 +82,7 @@ export default function ScrapeView({ onBack }) {
       fetches.push(
         fetch('/api/seloger/search', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ lat, lng, radius, filters: { size: pageSize } }),
+          body: JSON.stringify({ lat, lng, radius, filters: { size: pageSize, estateTypes: estateTypesForTargetType(type) } }),
         }).then(safeJson).then(d => ({ src: 'seloger', d })).catch(e => ({ src: 'seloger', err: e.message }))
       );
     }

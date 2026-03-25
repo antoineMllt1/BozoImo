@@ -1,172 +1,385 @@
-import { useState, useMemo, useCallback } from 'react';
-import { stripSelogerSnapshot } from '../utils/storage';
-import DvfTable        from './DvfTable';
-import SelogerTable    from './SelogerTable';
-import EstimationPanel from './EstimationPanel';
-import FiltragView     from './FiltragView';
-import AnalyseView     from './AnalyseView';
-import GdpView         from './GdpView';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DEFAULT_ANALYST_FILTERS } from '../utils/dossiers';
+import { stripDvfSnapshot, stripSelogerSnapshot } from '../utils/storage';
 import { normalizeRefs, applyFilters, computeMetrics, suggestRange } from '../utils/edm';
-import { computeEstimateFromRefs, addConfirmation } from '../utils/model';
+import { addConfirmation, computeAreaScores, computeEstimateFromRefs } from '../utils/model';
 import { saveModel } from '../utils/storage';
-import { fmtDate, fmtPm2 } from '../utils/formatters';
+import { exportDossierPdf } from '../utils/report';
+import { fmtDate } from '../utils/formatters';
+import { estateTypesForTargetType, itemTypesForTargetType, matchesTargetPropertyType } from '../utils/propertyType';
+import DataWorkbench from './DataWorkbench';
+import AnalystWorkbench from './AnalystWorkbench';
+import AlgoWorkbench from './AlgoWorkbench';
+import NeighborhoodWorkbench from './NeighborhoodWorkbench';
+import GdpView from './GdpView';
 
-const STATUS_LABEL = { draft: 'Brouillon', estimated: 'Estimé', confirmed: 'Confirmé' };
-const STATUS_CLASS = { draft: 'badge-draft', estimated: 'badge-estimated', confirmed: 'badge-confirmed' };
-const RADIUS_LABELS = { 250: '250m', 500: '500m', 1000: '1km', 2000: '2km', 5000: '5km' };
-
-const DEFAULT_FILTERS = {
-  ppm2Min: null, ppm2Max: null,
-  types: [], sources: ['dvf', 'seloger'],
-  areaMin: null, areaMax: null,
-  dpe: [],
+const STATUS_LABEL = {
+  draft: 'Brouillon',
+  in_progress: 'En cours',
+  estimated: 'Estimé',
+  confirmed: 'Confirmé',
+  archived: 'Archivé',
 };
 
-const STEPS_BUILDING = [
-  { id: 'collecte', label: 'Collecte',         desc: 'Données DVF & SeLoger' },
-  { id: 'filtrage', label: 'Filtrage',          desc: 'Sélection des références' },
-  { id: 'analyse',  label: 'Analyse',           desc: 'Étude de marché manuelle' },
-  { id: 'gdp',      label: 'Grille de prix',    desc: 'Valorisation lot par lot' },
-  { id: 'estim',    label: 'Estimation',        desc: 'ML vs Analyste' },
-];
+const STATUS_CLASS = {
+  draft: 'badge-draft',
+  in_progress: 'badge-estimated',
+  estimated: 'badge-estimated',
+  confirmed: 'badge-confirmed',
+  archived: 'badge-archived',
+};
 
-const STEPS_SINGLE = [
-  { id: 'collecte', label: 'Collecte',         desc: 'Données DVF & SeLoger' },
-  { id: 'filtrage', label: 'Filtrage',          desc: 'Sélection des références' },
-  { id: 'analyse',  label: 'Analyse',           desc: 'Étude de marché manuelle' },
-  { id: 'estim',    label: 'Estimation',        desc: 'ML vs Analyste' },
-];
+const RADIUS_LABELS = { 250: '250m', 500: '500m', 1000: '1km', 2000: '2km', 5000: '5km' };
+const METERS_PER_DEG_LAT = 111320;
+
+function guessWorkStatus(status) {
+  return status === 'draft' || status === 'archived' ? 'in_progress' : status;
+}
+
+function radiusToBounds(lat, lng, radiusM) {
+  const dLat = radiusM / METERS_PER_DEG_LAT;
+  const dLng = radiusM / (METERS_PER_DEG_LAT * Math.cos((lat * Math.PI) / 180));
+  return [lat - dLat, lng - dLng, lat + dLat, lng + dLng];
+}
+
+async function requestNeighborhoodProfile(payload) {
+  const endpoints = ['/api/villesavivre/profile', '/api/villesavivre/search'];
+  let lastError = null;
+
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : null;
+
+      if (!response.ok) {
+        const error = new Error(data?.error || `HTTP ${response.status}`);
+        error.status = response.status;
+        throw error;
+      }
+
+      return data;
+    } catch (error) {
+      lastError = error;
+      if (error?.status !== 404) break;
+    }
+  }
+
+  throw lastError || new Error('Route Villes a vivre indisponible');
+}
 
 export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, onBack }) {
   const isBuilding = dossier.analysisMode === 'building';
-  const STEPS = isBuilding ? STEPS_BUILDING : STEPS_SINGLE;
+  const target = dossier.target || {};
 
-  const [tab, setTab] = useState('collecte');
-  const [dataTab, setDataTab] = useState('dvf');
+  const [tab, setTab] = useState('data');
+  const [dataTab, setDataTab] = useState('retained');
   const [slRefetching, setSlRefetching] = useState(false);
-
-  // ── Centralized filter/analysis state ──────────────────────────────
-  const [filters, setFilters] = useState(dossier.analystFilters || DEFAULT_FILTERS);
+  const [reloadingRadius, setReloadingRadius] = useState(false);
+  const [filters, setFilters] = useState(dossier.analystFilters || DEFAULT_ANALYST_FILTERS);
   const [exclusions, setExclusions] = useState(dossier.analystExclusions || {});
-  const [temporal, setTemporal] = useState({ enabled: false, w0_6: 1.2, w6_12: 1.0, w12_24: 0.8, w24plus: 0.6 });
-  const [tauxNego, setTauxNego] = useState(5);
-  const [prixPivot, setPrixPivot] = useState(dossier.prixPivot || null);
+  const [analystBasePm2, setAnalystBasePm2] = useState(dossier.analystBasePm2 ?? dossier.prixPivot ?? null);
+  const [analystAdjustments, setAnalystAdjustments] = useState(dossier.analystAdjustments || []);
   const [manualEstimate, setManualEstimate] = useState(dossier.manualEstimate || null);
-  const [iqrApplied, setIqrApplied] = useState(false);
+  const [pendingRadius, setPendingRadius] = useState(dossier.radiusMeters || 500);
+  const [hoveredRefId, setHoveredRefId] = useState(null);
+  const [exporting, setExporting] = useState(false);
+  const [neighborhoodReloading, setNeighborhoodReloading] = useState(false);
+  const [neighborhoodError, setNeighborhoodError] = useState('');
+  const [iqrApplied, setIqrApplied] = useState(
+    dossier.analystFilters?.ppm2Min != null || dossier.analystFilters?.ppm2Max != null
+  );
 
-  const effectiveTaux = tauxNego / 100;
+  const exportMapRef = useRef(null);
+  const activeDossierIdRef = useRef(dossier.id);
 
-  // ── Derived data (shared across tabs) ──────────────────────────────
+  // Re-seed local editing state only when opening a different dossier.
+  useEffect(() => {
+    if (activeDossierIdRef.current === dossier.id) return;
+    activeDossierIdRef.current = dossier.id;
+    setFilters(dossier.analystFilters || DEFAULT_ANALYST_FILTERS);
+    setExclusions(dossier.analystExclusions || {});
+    setAnalystBasePm2(dossier.analystBasePm2 ?? dossier.prixPivot ?? null);
+    setAnalystAdjustments(dossier.analystAdjustments || []);
+    setManualEstimate(dossier.manualEstimate || null);
+    setPendingRadius(dossier.radiusMeters || 500);
+    setDataTab('retained');
+    setHoveredRefId(null);
+    setNeighborhoodError('');
+    setIqrApplied(dossier.analystFilters?.ppm2Min != null || dossier.analystFilters?.ppm2Max != null);
+  }, [dossier]);
+
+  const persistDossier = useCallback((patch, nextStatus = null) => {
+    const status = nextStatus || dossier.status;
+    onUpdate({
+      ...dossier,
+      ...patch,
+      archivedAt: status === 'archived'
+        ? (patch.archivedAt || dossier.archivedAt || new Date().toISOString())
+        : (Object.prototype.hasOwnProperty.call(patch, 'archivedAt') ? patch.archivedAt : null),
+      status,
+    });
+  }, [dossier, onUpdate]);
+
+  const effectiveTaux = (filters.negotiationRate ?? 5) / 100;
   const allRefs = useMemo(() => {
     const refs = normalizeRefs(dossier.dvfSnapshot, dossier.selogerSnapshot, effectiveTaux);
-    return refs.map(r => ({ ...r, excluded: exclusions[r.id] || false }));
-  }, [dossier.dvfSnapshot, dossier.selogerSnapshot, effectiveTaux, exclusions]);
+    return refs
+      .map(ref => ({ ...ref, excluded: exclusions[ref.id] || false }))
+      .filter(ref => matchesTargetPropertyType(ref, dossier.target?.type || null));
+  }, [dossier.dvfSnapshot, dossier.selogerSnapshot, dossier.target?.type, effectiveTaux, exclusions]);
 
-  const suggested = useMemo(() => suggestRange(allRefs.filter(r => !r.excluded)), [allRefs]);
+  const suggested = useMemo(() => suggestRange(allRefs.filter(ref => !ref.excluded)), [allRefs]);
 
-  // Auto-apply IQR on first load
-  useMemo(() => {
-    if (!iqrApplied && suggested) {
-      setFilters(p => ({ ...p, ppm2Min: suggested.min, ppm2Max: suggested.max }));
-      setIqrApplied(true);
-    }
-  }, [suggested, iqrApplied]);
+  useEffect(() => {
+    if (iqrApplied || !suggested) return;
+    if (filters.ppm2Min != null || filters.ppm2Max != null) return;
+    const nextFilters = { ...filters, ppm2Min: suggested.min, ppm2Max: suggested.max };
+    setFilters(nextFilters);
+    setIqrApplied(true);
+    persistDossier({ analystFilters: nextFilters }, guessWorkStatus(dossier.status));
+  }, [dossier.status, filters, iqrApplied, persistDossier, suggested]);
 
-  const filtered = useMemo(() => applyFilters(allRefs, filters), [allRefs, filters]);
+  const filtered = useMemo(() => applyFilters(allRefs, filters, dossier.target?.type || null), [allRefs, dossier.target?.type, filters]);
   const metrics = useMemo(
-    () => computeMetrics(allRefs, filtered, filters, effectiveTaux, temporal.enabled ? temporal : null),
-    [allRefs, filtered, filters, effectiveTaux, temporal]
+    () => computeMetrics(allRefs, filtered, filters, effectiveTaux, null, dossier.analystSourceWeights || { dvf: 1, seloger: 1 }),
+    [allRefs, dossier.analystSourceWeights, effectiveTaux, filtered, filters]
   );
 
-  // ML estimate from filtered refs
   const mlEstimate = useMemo(
-    () => computeEstimateFromRefs(filtered, dossier.target, model.correctionFactor),
-    [filtered, dossier.target, model.correctionFactor]
+    () => computeEstimateFromRefs(
+      filtered,
+      dossier.target,
+      model.correctionFactor,
+      dossier.areaContext || null,
+      { lat: dossier.lat, lng: dossier.lng }
+    ),
+    [filtered, dossier.areaContext, dossier.lat, dossier.lng, dossier.target, model.correctionFactor]
   );
 
-  const features = dossier.dvfSnapshot?.data?.features || [];
-  const t = dossier.target || {};
-  const slCount = dossier.selogerSnapshot?.data?.classifieds?.length || 0;
-  const dvfCount = features.length;
+  const areaScores = mlEstimate?.areaScores || computeAreaScores(dossier.areaContext || null);
 
-  // ── Persist filters/exclusions back to dossier ─────────────────────
-  const persistFilters = useCallback((f) => {
-    setFilters(f);
-    onUpdate({ ...dossier, analystFilters: f });
-  }, [dossier, onUpdate]);
+  const persistFilters = useCallback((nextFilters) => {
+    setFilters(nextFilters);
+    setIqrApplied(true);
+    persistDossier({ analystFilters: nextFilters }, guessWorkStatus(dossier.status));
+  }, [dossier.status, persistDossier]);
 
-  const persistExclusions = useCallback((exc) => {
-    setExclusions(exc);
-    onUpdate({ ...dossier, analystExclusions: exc });
-  }, [dossier, onUpdate]);
+  const persistExclusions = useCallback((nextExclusions) => {
+    setExclusions(nextExclusions);
+    persistDossier({ analystExclusions: nextExclusions }, guessWorkStatus(dossier.status));
+  }, [dossier.status, persistDossier]);
 
-  // ── Handlers ───────────────────────────────────────────────────────
-  const handlePivotChange = useCallback((pivot) => {
-    setPrixPivot(pivot);
-    onUpdate({ ...dossier, prixPivot: pivot });
-  }, [dossier, onUpdate]);
+  const handleAnalystBaseChange = useCallback((value) => {
+    setAnalystBasePm2(value);
+    persistDossier({ analystBasePm2: value }, guessWorkStatus(dossier.status));
+  }, [dossier.status, persistDossier]);
 
-  const handleManualEstimate = useCallback((val) => {
-    setManualEstimate(val);
-    onUpdate({ ...dossier, manualEstimate: val });
-  }, [dossier, onUpdate]);
+  const handleAnalystAdjustmentsChange = useCallback((nextAdjustments) => {
+    setAnalystAdjustments(nextAdjustments);
+    persistDossier({ analystAdjustments: nextAdjustments }, guessWorkStatus(dossier.status));
+  }, [dossier.status, persistDossier]);
 
-  const handleGdpUpdate = useCallback((updated) => {
-    onUpdate(updated);
-  }, [onUpdate]);
+  const handleReloadNeighborhood = useCallback(async () => {
+    if (neighborhoodReloading || dossier.lat == null || dossier.lng == null) return;
+
+    setNeighborhoodError('');
+    setNeighborhoodReloading(true);
+    try {
+      const data = await requestNeighborhoodProfile({
+        lat: dossier.lat,
+        lng: dossier.lng,
+        address: dossier.geocodedAddress || dossier.address || null,
+      });
+      if (!data?.success || !data?.villesAVivre) return;
+      persistDossier({
+        areaContext: {
+          ...(dossier.areaContext || {}),
+          fetchedAt: dossier.areaContext?.fetchedAt || new Date().toISOString(),
+          location: dossier.areaContext?.location || { lat: dossier.lat, lng: dossier.lng },
+          villesAVivre: data.villesAVivre,
+        },
+      }, guessWorkStatus(dossier.status));
+    } catch (error) {
+      if (error?.status === 404) {
+        setNeighborhoodError('API Villes a vivre introuvable. Redemarre le backend.');
+      } else {
+        setNeighborhoodError(error.message || 'Erreur Villes a vivre');
+      }
+    } finally {
+      setNeighborhoodReloading(false);
+    }
+  }, [dossier.areaContext, dossier.lat, dossier.lng, dossier.status, neighborhoodReloading, persistDossier]);
+
+  const handleManualEstimate = useCallback((value) => {
+    setManualEstimate(value);
+    persistDossier({ manualEstimate: value }, 'estimated');
+  }, [persistDossier]);
 
   const handleConfirm = useCallback((basePm2, actualPrice) => {
-    const { surfaceM2 } = dossier.target;
+    const surfaceM2 = dossier.target?.surfaceM2;
     if (!surfaceM2) return;
-    const result = addConfirmation(model.samples, { basePm2, actualPrice, surfaceM2, dossierId: dossier.id, address: dossier.address });
-    if (result.isOutlier) alert(`Ratio inhabituel (${result.samples.slice(-1)[0].ratio.toFixed(2)}×). Vérifiez le prix saisi.`);
-    const updatedModel = { ...model, samples: result.samples, correctionFactor: result.correctionFactor, mae: result.mae, mape: result.mape };
+
+    const result = addConfirmation(model.samples, {
+      basePm2,
+      actualPrice,
+      surfaceM2,
+      dossierId: dossier.id,
+      address: dossier.address,
+    });
+
+    const updatedModel = {
+      ...model,
+      samples: result.samples,
+      correctionFactor: result.correctionFactor,
+      mae: result.mae,
+      mape: result.mape,
+    };
+
     saveModel(updatedModel);
     onConfirmPrice(updatedModel);
-    onUpdate({ ...dossier, status: 'confirmed', confirmed: { actualPrice, actualPm2: Math.round(actualPrice / surfaceM2), confirmedAt: new Date().toISOString() } });
-  }, [dossier, model, onUpdate, onConfirmPrice]);
+    persistDossier({
+      confirmed: {
+        actualPrice,
+        actualPm2: Math.round(actualPrice / surfaceM2),
+        confirmedAt: new Date().toISOString(),
+      },
+    }, 'confirmed');
+  }, [dossier, model, onConfirmPrice, persistDossier]);
+
+  const handleReloadMarketData = useCallback(async () => {
+    if (reloadingRadius || !dossier.lat || !dossier.lng) return;
+
+    const nextRadius = pendingRadius || dossier.radiusMeters || 500;
+    setReloadingRadius(true);
+
+    try {
+      const [selogerResult, dvfResult] = await Promise.allSettled([
+        fetch('/api/seloger/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lat: dossier.lat,
+            lng: dossier.lng,
+            radius: nextRadius,
+            filters: { size: 100, estateTypes: estateTypesForTargetType(dossier.target?.type) },
+          }),
+        }).then(response => response.json()),
+        fetch('/api/immobilier/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bounds: radiusToBounds(dossier.lat, dossier.lng, nextRadius),
+            roomCount: [],
+            itemTypes: itemTypesForTargetType(dossier.target?.type),
+          }),
+        }).then(response => response.json()),
+      ]);
+
+      const nextExclusions = {};
+      setExclusions(nextExclusions);
+      setHoveredRefId(null);
+      setDataTab('retained');
+
+      const selogerSnapshot =
+        selogerResult.status === 'fulfilled' && !selogerResult.value?.error
+          ? {
+              data: stripSelogerSnapshot(selogerResult.value),
+              fetchedAt: new Date().toISOString(),
+              radiusMeters: nextRadius,
+            }
+          : {
+              error:
+                selogerResult.status === 'rejected'
+                  ? selogerResult.reason.message
+                  : selogerResult.value?.error || 'Erreur SeLoger',
+            };
+
+      let dvfRaw = null;
+      if (dvfResult.status === 'fulfilled' && dvfResult.value?.success) {
+        dvfRaw = stripDvfSnapshot(dvfResult.value.data);
+      }
+
+      const dvfSnapshot = dvfRaw
+        ? { data: dvfRaw, fetchedAt: new Date().toISOString(), radiusMeters: nextRadius }
+        : {
+            error:
+              dvfResult.status === 'rejected'
+                ? dvfResult.reason.message
+                : dvfResult.value?.error || 'Erreur DVF',
+          };
+
+      persistDossier({
+        radiusMeters: nextRadius,
+        analystExclusions: nextExclusions,
+        selectedComps: [],
+        dvfSnapshot,
+        selogerSnapshot,
+      }, guessWorkStatus(dossier.status));
+    } finally {
+      setReloadingRadius(false);
+    }
+  }, [dossier, pendingRadius, persistDossier, reloadingRadius]);
 
   const handleRefetchSeloger = useCallback(async () => {
     if (slRefetching || !dossier.lat || !dossier.lng) return;
     setSlRefetching(true);
     try {
-      const res = await fetch('/api/seloger/search', {
+      const response = await fetch('/api/seloger/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lat: dossier.lat, lng: dossier.lng, radius: dossier.radiusMeters, filters: { size: 100 } }),
+        body: JSON.stringify({
+          lat: dossier.lat,
+          lng: dossier.lng,
+          radius: dossier.radiusMeters,
+          filters: { size: 100, estateTypes: estateTypesForTargetType(dossier.target?.type) },
+        }),
       });
-      const data = await res.json();
+      const data = await response.json();
       const selogerSnapshot = data?.error
         ? { error: data.error }
         : { data: stripSelogerSnapshot(data), fetchedAt: new Date().toISOString() };
-      onUpdate({ ...dossier, selogerSnapshot });
-    } catch (e) {
-      onUpdate({ ...dossier, selogerSnapshot: { error: e.message } });
+      persistDossier({ selogerSnapshot }, guessWorkStatus(dossier.status));
+    } catch (error) {
+      persistDossier({ selogerSnapshot: { error: error.message } }, guessWorkStatus(dossier.status));
     } finally {
       setSlRefetching(false);
     }
-  }, [dossier, slRefetching, onUpdate]);
+  }, [dossier, persistDossier, slRefetching]);
 
-  // ── Step completion states ─────────────────────────────────────────
-  const stepState = (id) => {
-    if (id === 'collecte' && (dvfCount > 0 || slCount > 0)) return 'completed';
-    if (id === 'filtrage' && filtered.length > 0 && filtered.length < allRefs.length) return 'completed';
-    if (id === 'analyse' && prixPivot) return 'completed';
-    if (id === 'gdp' && dossier.lots?.length > 0) return 'completed';
-    if (id === 'estim' && dossier.confirmed) return 'completed';
-    return '';
-  };
+  const handleExportPdf = useCallback(async () => {
+    setExporting(true);
+    try {
+      await exportDossierPdf({
+        dossier,
+        estimate: mlEstimate,
+        metrics,
+        filteredRefs: filtered,
+        trend: null,
+        logoDataUrl: dossier.reportBrandLogo?.dataUrl || null,
+        chartNodes: { mapNode: tab === 'data' ? exportMapRef.current : null },
+      });
+    } finally {
+      setExporting(false);
+    }
+  }, [dossier, filtered, metrics, mlEstimate, tab]);
+
+  const summaryCards = [
+    { label: 'Références retenues', value: filtered.length },
+    { label: 'DVF', value: allRefs.filter(ref => ref.source === 'dvf').length },
+    { label: 'SeLoger', value: allRefs.filter(ref => ref.source === 'seloger').length },
+    { label: 'Algo', value: mlEstimate ? `${Math.round(mlEstimate.correctedPm2).toLocaleString('fr-FR')} €/m²` : '—' },
+  ];
 
   return (
-    <div className="workspace">
-      {/* Header */}
-      <div className="ws-header">
-        <button className="back-btn" onClick={onBack}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
-          </svg>
-          Dossiers
-        </button>
+    <div className="workspace workspace-clean">
+      <div className="ws-header ws-header-compact">
+        <button className="back-btn" onClick={onBack}>Dossiers</button>
         <div className="ws-title-block">
           <div className="ws-title-row">
             <h2 className="ws-address">{dossier.address}</h2>
@@ -175,139 +388,121 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
             </span>
           </div>
           <div className="ws-meta">
-            <span>Rayon {RADIUS_LABELS[dossier.radiusMeters] || `${dossier.radiusMeters}m`}</span>
-            {t.surfaceM2 && <><span className="ws-sep">·</span><span>{t.surfaceM2} m²</span></>}
-            {t.rooms && <><span className="ws-sep">·</span><span>{t.rooms} pièce{t.rooms > 1 ? 's' : ''}</span></>}
-            {t.type && <><span className="ws-sep">·</span><span>{t.type === 'Apartment' ? 'Appartement' : 'Maison'}</span></>}
-            <span className="ws-sep">·</span><span>{fmtDate(dossier.createdAt)}</span>
+            <span>{RADIUS_LABELS[dossier.radiusMeters] || `${dossier.radiusMeters}m`}</span>
+            {target.surfaceM2 && <><span className="ws-sep">·</span><span>{target.surfaceM2} m²</span></>}
+            {target.rooms && <><span className="ws-sep">·</span><span>{target.rooms}P</span></>}
+            {target.type && <><span className="ws-sep">·</span><span>{target.type === 'House' ? 'Maison' : 'Appartement'}</span></>}
             <span className="ws-sep">·</span>
-            <span className={`status-badge ${isBuilding ? 'badge-estimated' : 'badge-draft'}`}>
-              {isBuilding ? 'Immeuble' : 'Bien unique'}
-            </span>
+            <span>{fmtDate(dossier.createdAt)}</span>
           </div>
+        </div>
+        <div className="ws-header-actions">
+          <select
+            className="ws-status-select"
+            value={dossier.status}
+            onChange={(event) => persistDossier({}, event.target.value)}
+          >
+            <option value="draft">Brouillon</option>
+            <option value="in_progress">En cours</option>
+            <option value="estimated">Estimé</option>
+            <option value="confirmed">Confirmé</option>
+            <option value="archived">Archivé</option>
+          </select>
+          <button className="topbar-btn topbar-btn-primary" onClick={handleExportPdf} disabled={exporting}>
+            {exporting ? 'Génération...' : 'Exporter PDF'}
+          </button>
         </div>
       </div>
 
-      {/* Step Navigation */}
-      <div className="step-nav">
-        {STEPS.map((s, i) => (
-          <button
-            key={s.id}
-            className={`step-nav-item ${tab === s.id ? 'active' : ''} ${stepState(s.id)}`}
-            onClick={() => setTab(s.id)}
-          >
-            <span className="step-num">{stepState(s.id) === 'completed' ? '✓' : String(i + 1)}</span>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1 }}>
-              <span className="step-label">{s.label}</span>
-              <span style={{ fontSize: '.65rem', fontWeight: 400, opacity: .7 }}>{s.desc}</span>
-            </div>
-            {i < STEPS.length - 1 && <span className="step-arrow" />}
-          </button>
+      <div className="ws-summary-row">
+        {summaryCards.map(card => (
+          <div key={card.label} className="ws-summary-card">
+            <span>{card.label}</span>
+            <strong>{card.value}</strong>
+          </div>
         ))}
       </div>
 
-      {/* Quick stats bar */}
-      <div className="ws-quick-stats">
-        <div className="wqs-item">
-          <span className="wqs-val">{dvfCount}</span>
-          <span className="wqs-lbl">Transactions DVF</span>
-        </div>
-        <div className="wqs-item">
-          <span className="wqs-val">{slCount}</span>
-          <span className="wqs-lbl">Annonces SeLoger</span>
-        </div>
-        <div className="wqs-item">
-          <span className="wqs-val">{filtered.length}<span style={{ fontSize: '.75rem', fontWeight: 400, color: 'var(--text-3)' }}> / {allRefs.length}</span></span>
-          <span className="wqs-lbl">Refs retenues</span>
-        </div>
-        {prixPivot && (
-          <div className="wqs-item wqs-highlight">
-            <span className="wqs-val">{Math.round(prixPivot).toLocaleString('fr-FR')} €/m²</span>
-            <span className="wqs-lbl">Prix Pivot</span>
-          </div>
-        )}
-        {mlEstimate && (
-          <div className="wqs-item wqs-highlight">
-            <span className="wqs-val">{Math.round(mlEstimate.correctedPm2).toLocaleString('fr-FR')} €/m²</span>
-            <span className="wqs-lbl">Estimation ML</span>
-          </div>
-        )}
-        {isBuilding && dossier.lots?.length > 0 && (
-          <div className="wqs-item">
-            <span className="wqs-val">{dossier.lots.length}</span>
-            <span className="wqs-lbl">Lots saisis</span>
-          </div>
+      <div className="clean-tabs">
+        <button className={`clean-tab ${tab === 'data' ? 'active' : ''}`} onClick={() => setTab('data')}>Données</button>
+        <button className={`clean-tab ${tab === 'neighborhood' ? 'active' : ''}`} onClick={() => setTab('neighborhood')}>Quartier</button>
+        <button className={`clean-tab ${tab === 'analyst' ? 'active' : ''}`} onClick={() => setTab('analyst')}>Analyste</button>
+        <button className={`clean-tab ${tab === 'algo' ? 'active' : ''}`} onClick={() => setTab('algo')}>Algo</button>
+        {isBuilding && (
+          <button className={`clean-tab ${tab === 'gdp' ? 'active' : ''}`} onClick={() => setTab('gdp')}>Grille</button>
         )}
       </div>
 
-      {/* ── Tab: Collecte ── */}
-      {tab === 'collecte' && (
-        <div className="ws-data">
-          <div className="ws-tabs">
-            <button className={`ws-tab ${dataTab === 'dvf' ? 'active' : ''}`} onClick={() => setDataTab('dvf')}>
-              DVF — Transactions notariées {dvfCount > 0 && <span className="ws-tab-count">{dvfCount}</span>}
-            </button>
-            <button className={`ws-tab ${dataTab === 'seloger' ? 'active' : ''}`} onClick={() => setDataTab('seloger')}>
-              SeLoger — Offres actives {slCount > 0 && <span className="ws-tab-count">{slCount}</span>}
-            </button>
-          </div>
-          {dataTab === 'dvf' && <DvfTable snapshot={dossier.dvfSnapshot} selectedComps={dossier.selectedComps || []} onToggle={() => {}} />}
-          {dataTab === 'seloger' && <SelogerTable snapshot={dossier.selogerSnapshot} onRefetch={handleRefetchSeloger} refetching={slRefetching} />}
-        </div>
-      )}
+      <div ref={exportMapRef}>
+        {tab === 'data' && (
+          <DataWorkbench
+            dossier={dossier}
+            allRefs={allRefs}
+            filteredRefs={filtered}
+            filters={filters}
+            onFiltersChange={persistFilters}
+            suggested={suggested}
+            exclusions={exclusions}
+            onExclusionsChange={persistExclusions}
+            dataTab={dataTab}
+            onDataTabChange={setDataTab}
+            hoveredRefId={hoveredRefId}
+            onHoverRef={setHoveredRefId}
+            onRefetchSeloger={handleRefetchSeloger}
+            slRefetching={slRefetching}
+            targetType={dossier.target?.type || null}
+            pendingRadius={pendingRadius}
+            onPendingRadiusChange={setPendingRadius}
+            onReloadRadius={handleReloadMarketData}
+            reloadingRadius={reloadingRadius}
+          />
+        )}
 
-      {/* ── Tab: Filtrage ── */}
-      {tab === 'filtrage' && (
-        <FiltragView
-          allRefs={allRefs}
-          filters={filters}
-          onFiltersChange={persistFilters}
-          exclusions={exclusions}
-          onExclusionsChange={persistExclusions}
-          filtered={filtered}
-          metrics={metrics}
-          suggested={suggested}
-          onTemporalChange={setTemporal}
-        />
-      )}
+        {tab === 'neighborhood' && (
+          <NeighborhoodWorkbench
+            areaContext={dossier.areaContext || null}
+            areaScores={areaScores}
+            target={target}
+            onReload={handleReloadNeighborhood}
+            reloading={neighborhoodReloading}
+            canReload={dossier.lat != null && dossier.lng != null}
+            error={neighborhoodError}
+          />
+        )}
 
-      {/* ── Tab: Analyse ── */}
-      {tab === 'analyse' && (
-        <AnalyseView
-          dossier={dossier}
-          filteredRefs={filtered}
-          metrics={metrics}
-          prixPivot={prixPivot}
-          onPivotChange={handlePivotChange}
-          isBuilding={isBuilding}
-          onManualEstimate={handleManualEstimate}
-        />
-      )}
+        {tab === 'analyst' && (
+          <AnalystWorkbench
+            metrics={metrics}
+            areaScores={areaScores}
+            target={target}
+            analystBasePm2={analystBasePm2}
+            analystAdjustments={analystAdjustments}
+            manualEstimate={manualEstimate}
+            onBaseChange={handleAnalystBaseChange}
+            onAdjustmentsChange={handleAnalystAdjustmentsChange}
+            onApplyEstimate={handleManualEstimate}
+          />
+        )}
 
-      {/* ── Tab: GDP (building only) ── */}
-      {tab === 'gdp' && (
-        <GdpView
-          dossier={dossier}
-          prixPivot={prixPivot}
-          onUpdate={handleGdpUpdate}
-        />
-      )}
-
-      {/* ── Tab: Estimation ── */}
-      {tab === 'estim' && (
-        <div className="ws-estim-layout">
-          <EstimationPanel
+        {tab === 'algo' && (
+          <AlgoWorkbench
             estimate={mlEstimate}
-            target={t}
+            filteredRefs={filtered}
             model={model}
+            target={target}
             onConfirm={handleConfirm}
             alreadyConfirmed={dossier.confirmed}
-            manualEstimate={manualEstimate}
-            prixPivot={prixPivot}
-            nFilteredRefs={filtered.length}
           />
-        </div>
-      )}
+        )}
+
+        {tab === 'gdp' && isBuilding && (
+          <GdpView
+            dossier={dossier}
+            prixPivot={manualEstimate || analystBasePm2}
+            onUpdate={(updated) => onUpdate({ ...updated, status: guessWorkStatus(dossier.status) })}
+          />
+        )}
+      </div>
     </div>
   );
 }

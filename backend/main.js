@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
 const path = require('path');
 const apiRoutes = require('./routes');
 
@@ -20,15 +21,26 @@ app.use((req, res, next) => {
 // Routes de l'API
 app.use('/api', apiRoutes);
 
+const distPath = path.join(__dirname, '..', 'frontend', 'dist');
+const shouldServeStatic =
+  fs.existsSync(distPath) &&
+  (
+    process.env.ELECTRON_STATIC === 'true' ||
+    process.env.SERVE_STATIC === 'true' ||
+    Boolean(process.env.RAILWAY_ENVIRONMENT)
+  );
+
 // ── Electron production: serve built frontend ──────────────────────────────────
-if (process.env.ELECTRON_STATIC === 'true') {
-  const distPath = path.join(__dirname, '..', 'frontend', 'dist');
+if (shouldServeStatic) {
   app.use(express.static(distPath));
-  app.get('/{*path}', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
+  app.get(/^\/(?!api(?:\/|$)).*/, (req, res) => res.sendFile(path.join(distPath, 'index.html')));
 }
 
 // Route racine
 app.get('/', (req, res) => {
+  if (shouldServeStatic) {
+    return res.sendFile(path.join(distPath, 'index.html'));
+  }
   res.json({
     message: 'Bienvenue sur l\'API BozoImo',
     documentation: '/api'
@@ -64,4 +76,7 @@ app.listen(PORT, () => {
   console.log(`\n   🏠 SeLoger:`);
   console.log(`   POST http://localhost:${PORT}/api/seloger/search`);
   console.log(`   POST http://localhost:${PORT}/api/seloger/autocomplete`);
+  console.log(`\n   🏙️ Villes a vivre:`);
+  console.log(`   POST http://localhost:${PORT}/api/villesavivre/search`);
+  console.log(`   POST http://localhost:${PORT}/api/villesavivre/profile`);
 });

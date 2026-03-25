@@ -74,22 +74,46 @@ async function makeRequest(config) {
   const page = await getPage();
   const method = (config.method || 'GET').toUpperCase();
   const body   = config.data ? (typeof config.data === 'string' ? config.data : JSON.stringify(config.data)) : undefined;
+  const headers = {
+    accept: 'application/json, text/plain, */*',
+    origin: 'https://www.seloger.com',
+    referer: 'https://www.seloger.com/',
+  };
 
-  const result = await page.evaluate(async (url, method, body) => {
+  for (const [key, value] of Object.entries(config.headers || {})) {
+    if (value == null) continue;
+    const normalized = key.toLowerCase();
+    if (
+      normalized === 'accept' ||
+      normalized === 'content-type' ||
+      normalized === 'origin' ||
+      normalized === 'referer' ||
+      normalized === 'x-language' ||
+      normalized.startsWith('x-')
+    ) {
+      headers[key] = value;
+    }
+  }
+
+  if (body) {
+    const hasContentType = Object.keys(headers).some(key => key.toLowerCase() === 'content-type');
+    if (!hasContentType) headers['content-type'] = 'application/json';
+  } else {
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() === 'content-type') delete headers[key];
+    }
+  }
+
+  const result = await page.evaluate(async ({ url, method, body, headers }) => {
     const res = await fetch(url, {
       method,
-      headers: {
-        'accept':       'application/json, text/plain, */*',
-        'content-type': 'application/json',
-        'origin':       'https://www.seloger.com',
-        'referer':      'https://www.seloger.com/',
-      },
+      headers,
       body,
       credentials: 'include',
     });
     const text = await res.text();
     return { status: res.status, text };
-  }, config.url, method, body);
+  }, { url: config.url, method, body, headers });
 
   if (result.status >= 400) {
     const err = new Error(`SeLoger responded with ${result.status}`);
@@ -98,6 +122,63 @@ async function makeRequest(config) {
   }
 
   return { data: JSON.parse(result.text) };
+}
+
+const CLASSIFIED_DETAILS_BATCH_SIZE = 50;
+const CLASSIFIED_DETAILS_RETRY_DELAY_MS = 150;
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function getClassifiedDetailsInBatches(classifiedIds) {
+  const details = [];
+
+  for (let i = 0; i < classifiedIds.length; i += CLASSIFIED_DETAILS_BATCH_SIZE) {
+    const batch = classifiedIds.slice(i, i + CLASSIFIED_DETAILS_BATCH_SIZE);
+    const batchDetails = await getClassifiedDetailsChunk(batch);
+    details.push(...batchDetails);
+
+    if (i + CLASSIFIED_DETAILS_BATCH_SIZE < classifiedIds.length) {
+      await sleep(CLASSIFIED_DETAILS_RETRY_DELAY_MS);
+    }
+  }
+
+  if (details.length !== classifiedIds.length) {
+    console.warn(`Détails SeLoger incomplets: ${details.length}/${classifiedIds.length} annonces récupérées`);
+  }
+
+  return details;
+}
+
+async function getClassifiedDetailsChunk(classifiedIds) {
+  const idsString = classifiedIds.join(',');
+  const config = {
+    method: 'get',
+    maxBodyLength: Infinity,
+    url: `https://www.seloger.com/classifiedList/${idsString}`,
+    headers: {
+      ...DEFAULT_HEADERS,
+      'accept': '*/*',
+      'x-language': 'fr'
+    }
+  };
+
+  try {
+    const response = await makeRequest(config);
+    return Array.isArray(response.data) ? response.data : [];
+  } catch (error) {
+    if (classifiedIds.length > 1) {
+      const mid = Math.ceil(classifiedIds.length / 2);
+      console.warn(`Lot SeLoger refusé (${classifiedIds.length} IDs, ${error.message}) - nouveau découpage`);
+      const left = await getClassifiedDetailsChunk(classifiedIds.slice(0, mid));
+      const right = await getClassifiedDetailsChunk(classifiedIds.slice(mid));
+      return [...left, ...right];
+    }
+
+    console.error(`Erreur lors de la récupération du détail ${classifiedIds[0]}:`, error.message);
+    return [];
+  }
 }
 
 /**
@@ -264,6 +345,9 @@ async function getClassifiedDetails(classifiedIds) {
   if (!classifiedIds || classifiedIds.length === 0) {
     return [];
   }
+
+  const uniqueIds = [...new Set(classifiedIds.filter(Boolean))];
+  return getClassifiedDetailsInBatches(uniqueIds);
 
   // Joindre les IDs avec des virgules
   const idsString = classifiedIds.join(',');

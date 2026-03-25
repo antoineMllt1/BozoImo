@@ -3,6 +3,7 @@ import { fmtPm2, fmtDate } from '../utils/formatters';
 
 const TYPES   = ['T1','T2','T3','T4','T5'];
 const DEFAULT_FILTERS = {
+  negotiationRate: 5,
   ppm2Min: null, ppm2Max: null,
   types: [], sources: ['dvf','seloger'],
   areaMin: null, areaMax: null,
@@ -48,12 +49,14 @@ export default function FiltragView({
   metrics,
   suggested,
   onTemporalChange,
+  hoveredRefId = null,
+  onHoverRef = null,
 }) {
   const [temporal,  setTemporal]  = useState(DEFAULT_TEMPORAL);
   const [sortCol,   setSortCol]   = useState('ppm2');
   const [sortDir,   setSortDir]   = useState('asc');
   const [showAll,   setShowAll]   = useState(false);
-  const [localTaux, setLocalTaux] = useState(5);
+  const negotiationRate = filters.negotiationRate ?? 5;
 
   /* propagate temporal changes to parent */
   const updateTemporal = useCallback((next) => {
@@ -113,7 +116,7 @@ export default function FiltragView({
     return 'ref-in';
   };
 
-  const Th = ({ col, label }) => (
+  const renderSortHeader = (col, label) => (
     <th className="th-sort" onClick={() => sortBy(col)}>
       {label}{sortCol === col ? (sortDir === 'asc' ? ' \u2191' : ' \u2193') : ''}
     </th>
@@ -231,8 +234,11 @@ export default function FiltragView({
               <div className="efp-taux">
                 <span>Taux de n&eacute;gociation :</span>
                 <input type="number" min="0" max="20" step="0.5" className="ef-input ef-input-sm"
-                  value={localTaux}
-                  onChange={e => setLocalTaux(+e.target.value)} />
+                  value={negotiationRate}
+                  onChange={e => {
+                    const next = +e.target.value;
+                    sf('negotiationRate', next);
+                  }} />
                 <span>%</span>
                 <span className="efp-hint">Prix SeLoger r&eacute;duits de ce %</span>
               </div>
@@ -308,15 +314,15 @@ export default function FiltragView({
           <table className="data-table">
             <thead>
               <tr>
-                <Th col="source" label="Source" />
+                {renderSortHeader('source', 'Source')}
                 <th>Adresse</th>
-                <Th col="date"  label="Date" />
-                <Th col="type"  label="Type" />
-                <Th col="area"  label="m&sup2;" />
-                <Th col="floor" label="&Eacute;t." />
-                <Th col="dpe"   label="DPE" />
-                <Th col="price" label="Prix &euro;" />
-                <Th col="ppm2"  label="&euro;/m&sup2;" />
+                {renderSortHeader('date', 'Date')}
+                {renderSortHeader('type', 'Type')}
+                {renderSortHeader('area', 'm&sup2;')}
+                {renderSortHeader('floor', '&Eacute;t.')}
+                {renderSortHeader('dpe', 'DPE')}
+                {renderSortHeader('price', 'Prix &euro;')}
+                {renderSortHeader('ppm2', '&euro;/m&sup2;')}
                 <th title="Cocher pour exclure de l'analyse">Excl.</th>
               </tr>
             </thead>
@@ -324,7 +330,12 @@ export default function FiltragView({
               {(showAll ? sorted : sorted.slice(0, ROWS_DEFAULT)).map(r => {
                 const rc = rowClass(r);
                 return (
-                  <tr key={r.id} className={rc}>
+                  <tr
+                    key={r.id}
+                    className={`${rc} ${hoveredRefId === r.id ? 'ref-hovered' : ''}`.trim()}
+                    onMouseEnter={() => onHoverRef?.(r.id)}
+                    onMouseLeave={() => onHoverRef?.(null)}
+                  >
                     <td>
                       <span className={`src-badge src-${r.source}`}>
                         {r.source === 'dvf' ? 'DVF' : 'SL'}

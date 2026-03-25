@@ -7,7 +7,13 @@ function dl(content, mime, name) {
   document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(u);
 }
 
-export default function DvfTable({ snapshot, selectedComps, onToggle }) {
+export default function DvfTable({
+  snapshot,
+  selectedComps,
+  onToggle,
+  hoveredRefId = null,
+  onHoverRef = null,
+}) {
   if (!snapshot) return (
     <div className="snap-placeholder"><p>Données DVF non disponibles.</p></div>
   );
@@ -99,9 +105,17 @@ export default function DvfTable({ snapshot, selectedComps, onToggle }) {
               {features.map((feat, i) => {
                 const p        = feat.properties;
                 const isOn     = selectedComps.includes(i);
+                const refId    = `dvf_${i}`;
                 const pm2      = p.area > 0 ? Math.round(p.updated_price / p.area) : null;
                 return (
-                  <tr key={p.id || i} className={isOn ? 'dvf-row-on' : ''} onClick={() => onToggle(i)} style={{ cursor: 'pointer' }}>
+                  <tr
+                    key={p.id || i}
+                    className={`${isOn ? 'dvf-row-on' : ''} ${hoveredRefId === refId ? 'ref-hovered' : ''}`.trim()}
+                    onClick={() => onToggle(i)}
+                    onMouseEnter={() => onHoverRef?.(refId)}
+                    onMouseLeave={() => onHoverRef?.(null)}
+                    style={{ cursor: 'pointer' }}
+                  >
                     <td className="td-check" onClick={e => e.stopPropagation()}>
                       <input type="checkbox" checked={isOn} onChange={() => onToggle(i)} />
                     </td>
