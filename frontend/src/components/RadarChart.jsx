@@ -18,6 +18,10 @@ export default function RadarChart({ scores = {} }) {
     { key: 'walkScore', label: 'Walk', value: scores.walkScore },
     { key: 'educationScore', label: 'Ecoles', value: scores.educationScore },
     { key: 'environmentScore', label: 'Env.', value: scores.environmentScore },
+    { key: 'safetyScore', label: 'Securite', value: scores.safetyScore },
+    { key: 'servicesScore', label: 'Services', value: scores.servicesScore },
+    { key: 'economyScore', label: 'Economie', value: scores.economyScore },
+    { key: 'liveabilityScore', label: 'Cadre vie', value: scores.liveabilityScore },
     { key: 'premium', label: 'Prime', value: premiumToScore(scores.neighborhoodPremium) },
   ].filter(axis => Number.isFinite(axis.value));
 
@@ -50,7 +54,7 @@ export default function RadarChart({ scores = {} }) {
       <div className="viz-card-header">
         <div>
           <h3>Profil quartier</h3>
-          <p>Lecture composite des transports, amenites, ecoles, environnement et prime de quartier.</p>
+          <p>Scores quartier : transport, ecoles, securite, services, economie et cadre de vie.</p>
         </div>
       </div>
 

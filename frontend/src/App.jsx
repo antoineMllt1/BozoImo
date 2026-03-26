@@ -19,12 +19,9 @@ const UI_PREFS_KEY = 'estimia_ui_prefs_v2';
 function readUiPrefs() {
   try {
     const parsed = JSON.parse(localStorage.getItem(UI_PREFS_KEY) || '{}');
-    return {
-      density: ['compact', 'regular', 'comfortable'].includes(parsed.density) ? parsed.density : 'regular',
-      sidebarCollapsed: parsed.sidebarCollapsed === true,
-    };
+    return { sidebarCollapsed: parsed.sidebarCollapsed === true };
   } catch {
-    return { density: 'regular', sidebarCollapsed: false };
+    return { sidebarCollapsed: false };
   }
 }
 
@@ -77,7 +74,6 @@ export default function App() {
   const [dossiers, setDossiers] = useState(() => loadDossiers());
   const [activeDossierId, setActiveDossierId] = useState(null);
   const [model, setModel] = useState(loadModel);
-  const [density, setDensity] = useState(uiPrefs.density);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(uiPrefs.sidebarCollapsed);
   const [commandOpen, setCommandOpen] = useState(false);
 
@@ -89,8 +85,8 @@ export default function App() {
   }, [dossiers]);
 
   useEffect(() => {
-    localStorage.setItem(UI_PREFS_KEY, JSON.stringify({ density, sidebarCollapsed }));
-  }, [density, sidebarCollapsed]);
+    localStorage.setItem(UI_PREFS_KEY, JSON.stringify({ sidebarCollapsed }));
+  }, [sidebarCollapsed]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -211,11 +207,6 @@ export default function App() {
       setCommandOpen(false);
       return;
     }
-    if (payload.type === 'density') {
-      setDensity(payload.value);
-      setCommandOpen(false);
-      return;
-    }
     if (payload.type === 'toggle_sidebar') {
       setSidebarCollapsed(current => !current);
       setCommandOpen(false);
@@ -228,21 +219,6 @@ export default function App() {
 
   const topbarRight = (
     <div className="topbar-right">
-      <div className="density-switch" role="group" aria-label="Densite">
-        {[
-          ['compact', 'Compact'],
-          ['regular', 'Regulier'],
-          ['comfortable', 'Confort'],
-        ].map(([value, label]) => (
-          <button
-            key={value}
-            className={`density-btn ${density === value ? 'active' : ''}`}
-            onClick={() => setDensity(value)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
       <button className="topbar-btn" onClick={() => setCommandOpen(true)}>
         Cmd+K
       </button>
@@ -265,14 +241,10 @@ export default function App() {
   );
 
   return (
-    <div className={`app app-density-${density} ${sidebarCollapsed ? 'app-sidebar-collapsed' : ''}`}>
+    <div className={`app ${sidebarCollapsed ? 'app-sidebar-collapsed' : ''}`}>
       <aside className="sidebar">
         <div className="sb-logo">
-          <div className="sb-logo-mark">E</div>
-          <div className="sb-logo-text">
-            <span className="sb-logo-name">Estimia</span>
-            <span className="sb-logo-tag">Analyse immobiliere</span>
-          </div>
+          <img src="/logo_final-removebg-preview.png" alt="Estimia" className="sb-logo-img" />
           <button className="sb-collapse-btn" onClick={() => setSidebarCollapsed(current => !current)} title="Basculer la barre laterale">
             {sidebarCollapsed ? '→' : '←'}
           </button>

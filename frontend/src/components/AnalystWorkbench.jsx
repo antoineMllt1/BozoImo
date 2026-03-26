@@ -1,5 +1,8 @@
+import { useState } from 'react';
 import { ANALYST_ADJUSTMENT_OPTIONS } from '../utils/dossiers';
 import { fmtPm2, fmtPrice } from '../utils/formatters';
+import TargetEditor from './TargetEditor';
+import Dropdown from './Dropdown';
 
 function makeAdjustment() {
   return {
@@ -34,7 +37,9 @@ export default function AnalystWorkbench({
   onBaseChange,
   onAdjustmentsChange,
   onApplyEstimate,
+  onTargetChange,
 }) {
+  const [showEditor, setShowEditor] = useState(false);
   const basePm2 = analystBasePm2 ?? metrics?.avgWeighted ?? metrics?.avg ?? null;
   const computedPm2 = computeAnalystPm2(basePm2, analystAdjustments);
   const displayedPm2 = computedPm2 ?? manualEstimate;
@@ -104,18 +109,15 @@ export default function AnalystWorkbench({
             )}
             {(analystAdjustments || []).map(item => (
               <div key={item.id} className="awb-adjustment-row">
-                <select
+                <Dropdown
                   value={item.key}
-                  onChange={(event) => onAdjustmentsChange(
+                  onChange={(v) => onAdjustmentsChange(
                     analystAdjustments.map(entry => (
-                      entry.id === item.id ? { ...entry, key: event.target.value } : entry
+                      entry.id === item.id ? { ...entry, key: v } : entry
                     ))
                   )}
-                >
-                  {ANALYST_ADJUSTMENT_OPTIONS.map(option => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
+                  options={ANALYST_ADJUSTMENT_OPTIONS}
+                />
                 <input
                   type="number"
                   min="-30"
@@ -140,6 +142,21 @@ export default function AnalystWorkbench({
           </div>
         </section>
       </div>
+
+      <section className="awb-card">
+        <div className="awb-card-head">
+          <div>
+            <h3>Caractéristiques du bien</h3>
+            <p>Corrigez surface, étage, DPE, etc. pour ajuster vos calculs.</p>
+          </div>
+          <button className="topbar-btn" onClick={() => setShowEditor(!showEditor)}>
+            {showEditor ? 'Masquer' : 'Modifier'}
+          </button>
+        </div>
+        {showEditor && onTargetChange && (
+          <TargetEditor target={target} onChange={onTargetChange} />
+        )}
+      </section>
 
       <section className="awb-card awb-result-card">
         <div className="awb-card-head">

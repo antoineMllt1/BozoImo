@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { fmtK, fmtPm2, fmtPrice } from '../utils/formatters';
 import { modelStats } from '../utils/model';
+import TargetEditor from './TargetEditor';
 
 function factorClass(factor) {
   if (factor > 1.001) return 'est-val-up';
@@ -44,10 +45,14 @@ export default function AlgoWorkbench({
   filteredRefs,
   model,
   target,
+  onTargetChange,
   onConfirm,
   alreadyConfirmed,
+  disabledFactors,
+  onDisabledFactorsChange,
 }) {
   const [price, setPrice] = useState('');
+  const [showEditor, setShowEditor] = useState(false);
   const stats = modelStats(model.samples, model.correctionFactor);
   const refsRange = useMemo(() => priceRange(filteredRefs), [filteredRefs]);
   const hasSurface = target?.surfaceM2 > 0;
@@ -132,17 +137,33 @@ export default function AlgoWorkbench({
         <section className="algo-card">
           <div className="algo-card-head">
             <h3>Pondérations du bien</h3>
-            <p>Facteurs appliqués au bien cible.</p>
+            <p>Facteurs calculés automatiquement. Désactivez ceux à ignorer.</p>
           </div>
           <div className="algo-list">
-            {(estimate.propertyAdjustments || []).filter(item => item?.label && Math.abs(item.factor - 1) > 0.0001).map(item => (
-              <div key={item.label} className="algo-row">
-                <span>{item.label}</span>
-                <strong className={factorClass(item.factor)}>x {item.factor.toFixed(2)}</strong>
-              </div>
-            ))}
-            {!(estimate.propertyAdjustments || []).some(item => item?.label && Math.abs(item.factor - 1) > 0.0001) && (
-              <div className="algo-empty-row">Aucune correction spécifique sur le bien.</div>
+            {(estimate.propertyAdjustments || []).filter(item => item?.label).map(item => {
+              const off = disabledFactors?.[item.label] === true;
+              const active = !off && Math.abs(item.factor - 1) > 0.0001;
+              return (
+                <div key={item.label} className={`algo-row algo-row-toggle ${off ? 'algo-row-off' : ''}`}>
+                  <label className="algo-toggle-label">
+                    <input
+                      type="checkbox"
+                      checked={!off}
+                      onChange={() => onDisabledFactorsChange?.({
+                        ...disabledFactors,
+                        [item.label]: !off,
+                      })}
+                    />
+                    <span>{item.label}</span>
+                  </label>
+                  <strong className={active ? factorClass(item.factor) : 'est-val-muted'}>
+                    x {item.factor.toFixed(2)}
+                  </strong>
+                </div>
+              );
+            })}
+            {!(estimate.propertyAdjustments || []).some(item => item?.label) && (
+              <div className="algo-empty-row">Aucune correction détectée. Renseignez les caractéristiques ci-dessous.</div>
             )}
           </div>
         </section>
@@ -199,6 +220,21 @@ export default function AlgoWorkbench({
           )}
         </section>
       </div>
+
+      <section className="algo-card algo-card-wide">
+        <div className="algo-card-head">
+          <div>
+            <h3>Caractéristiques du bien</h3>
+            <p>Corrigez les données pour recalculer les pondérations automatiquement.</p>
+          </div>
+          <button className="topbar-btn" onClick={() => setShowEditor(!showEditor)}>
+            {showEditor ? 'Masquer' : 'Modifier'}
+          </button>
+        </div>
+        {showEditor && onTargetChange && (
+          <TargetEditor target={target} onChange={onTargetChange} />
+        )}
+      </section>
     </div>
   );
 }

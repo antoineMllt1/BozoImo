@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { computePrixPivot } from '../utils/edm';
 import { fmtPm2 } from '../utils/formatters';
 import { computeAreaScores } from '../utils/model';
+import NumberInput from './NumberInput';
 
 const TYPES = ['T1', 'T2', 'T3', 'T4', 'T5'];
 
@@ -167,17 +168,17 @@ export default function AnalyseView({
                   <div className="as-typo-control">
                     {isBuilding ? (
                       <>
-                        <input
-                          type="number"
-                          min="0"
-                          max="999"
-                          step="1"
-                          className={`as-typo-input ${typoW[type] > 0 ? 'has-val' : ''}`}
+                        <NumberInput
+                          label={`Lots ${type}`}
+                          min={0}
+                          max={999}
+                          step={1}
+                          size="sm"
                           value={typoW[type]}
                           disabled={!data}
-                          onChange={event => setTypoW(current => ({ ...current, [type]: Math.max(0, +event.target.value) }))}
+                          onChange={value => setTypoW(current => ({ ...current, [type]: Math.max(0, value ?? 0) }))}
+                          suffix="lots"
                         />
-                        <span className="as-typo-unit">lots</span>
                       </>
                     ) : (
                       <>

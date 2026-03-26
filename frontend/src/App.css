@@ -4,33 +4,33 @@
    ============================================================ */
 
 :root {
-  /* Backgrounds — warm off-white */
-  --bg:       #f5f5f0;
+  /* Backgrounds — cool off-white */
+  --bg:       #f3f4f8;
   --bg-card:  #ffffff;
-  --bg-soft:  #f0efeb;
-  --bg-hover: #eae9e4;
+  --bg-soft:  #eceef4;
+  --bg-hover: #e4e6ee;
 
   /* Text — sophisticated dark hierarchy */
   --text:   #111827;
   --text-2: #4b5563;
   --text-3: #9ca3af;
 
-  /* Sidebar — rich dark navy */
-  --sb-bg:      #0f172a;
+  /* Sidebar — matches logo dark navy */
+  --sb-bg:      #141929;
   --sb-text:    rgba(255,255,255,.90);
   --sb-text-2:  rgba(255,255,255,.45);
-  --sb-hover:   rgba(255,255,255,.06);
-  --sb-active:  rgba(99,102,241,.20);
+  --sb-hover:   rgba(255,255,255,.07);
+  --sb-active:  rgba(139,157,195,.18);
   --sb-border:  rgba(255,255,255,.08);
   --sb-w:       256px;
 
-  /* Accent — deep indigo */
-  --accent:        #4f46e5;
-  --accent-h:      #4338ca;
-  --accent-soft:   #eef2ff;
-  --accent-border: #c7d2fe;
-  --accent-text:   #3730a3;
-  --accent-light:  #818cf8;
+  /* Accent — cool slate-blue from logo "IA" */
+  --accent:        #4a5a8a;
+  --accent-h:      #3d4d7a;
+  --accent-soft:   #edf0f7;
+  --accent-border: #c5cde3;
+  --accent-text:   #2e3d66;
+  --accent-light:  #8b9dc3;
 
   /* Price — elegant emerald */
   --price:    #059669;
@@ -94,7 +94,53 @@ body {
 
 button { font-family: inherit; cursor: pointer; border: none; background: none; }
 input  { font-family: inherit; }
+select { font-family: inherit; }
 a      { color: inherit; text-decoration: none; }
+
+/* ── Global select styling ────────────────────────────────── */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-color: var(--bg-card);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px;
+  padding: 8px 32px 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--text);
+  font-size: .8125rem;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: border-color var(--t), box-shadow var(--t), background-color var(--t);
+  outline: none;
+}
+select:hover {
+  border-color: var(--border-2);
+  background-color: var(--bg-soft);
+}
+select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  background-color: var(--bg-card);
+}
+select:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+  background-color: var(--bg-soft);
+}
+select option {
+  padding: 8px 12px;
+  background: var(--bg-card);
+  color: var(--text);
+}
+select option:checked {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
 
 /* ── Focus styles ───────────────────────────────────────────── */
 *:focus-visible {
@@ -146,40 +192,16 @@ a      { color: inherit; text-decoration: none; }
 .sb-logo {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 20px 20px 18px;
+  padding: 20px 16px 18px;
   border-bottom: 1px solid var(--sb-border);
   flex-shrink: 0;
 }
 
-.sb-logo-mark {
-  width: 34px;
-  height: 34px;
-  background: linear-gradient(135deg, #4f46e5, #7c3aed);
-  border-radius: var(--r-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 800;
-  color: #fff;
-  letter-spacing: -.03em;
+.sb-logo-img {
+  height: 56px;
+  width: auto;
+  object-fit: contain;
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(79,70,229,.35), inset 0 1px 0 rgba(255,255,255,.15);
-}
-
-.sb-logo-text { display: flex; flex-direction: column; gap: 1px; line-height: 1.2; }
-.sb-logo-name {
-  font-size: 16px;
-  font-weight: 700;
-  color: #fff;
-  letter-spacing: -.03em;
-}
-.sb-logo-tag {
-  font-size: 11px;
-  color: var(--sb-text-2);
-  letter-spacing: .01em;
-  font-weight: 400;
 }
 
 .sb-nav {

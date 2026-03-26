@@ -22,6 +22,74 @@ function valueOrFallback(value, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+function PriceHistogram({ refs, filterMin, filterMax }) {
+  const values = refs.map(r => r.ppm2).filter(Number.isFinite);
+  if (values.length < 3) return null;
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min;
+  if (range <= 0) return null;
+
+  const bucketCount = Math.min(20, Math.max(8, Math.ceil(values.length / 3)));
+  const bucketSize = range / bucketCount;
+  const buckets = Array.from({ length: bucketCount }, () => 0);
+  for (const v of values) {
+    const idx = Math.min(bucketCount - 1, Math.floor((v - min) / bucketSize));
+    buckets[idx]++;
+  }
+  const maxCount = Math.max(...buckets);
+  const w = 100 / bucketCount;
+
+  return (
+    <div className="dw-histogram">
+      <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="dw-histo-svg">
+        {buckets.map((count, i) => {
+          const x = i * w;
+          const h = maxCount > 0 ? (count / maxCount) * 36 : 0;
+          const bucketMin = min + i * bucketSize;
+          const bucketMax = bucketMin + bucketSize;
+          const inRange =
+            (filterMin == null || bucketMax >= filterMin) &&
+            (filterMax == null || bucketMin <= filterMax);
+          return (
+            <rect
+              key={i}
+              x={x + 0.3}
+              y={40 - h}
+              width={Math.max(0.5, w - 0.6)}
+              height={h}
+              className={inRange ? 'histo-bar-active' : 'histo-bar-muted'}
+            />
+          );
+        })}
+        {filterMin != null && (
+          <line
+            x1={((filterMin - min) / range) * 100}
+            y1="0"
+            x2={((filterMin - min) / range) * 100}
+            y2="40"
+            className="histo-marker"
+          />
+        )}
+        {filterMax != null && (
+          <line
+            x1={((filterMax - min) / range) * 100}
+            y1="0"
+            x2={((filterMax - min) / range) * 100}
+            y2="40"
+            className="histo-marker"
+          />
+        )}
+      </svg>
+      <div className="dw-histo-labels">
+        <span>{Math.round(min).toLocaleString('fr-FR')}</span>
+        <span>{Math.round(max).toLocaleString('fr-FR')} €/m²</span>
+      </div>
+    </div>
+  );
+}
+
 function RangeControl({
   label,
   minValue,
@@ -237,6 +305,8 @@ export default function DataWorkbench({
               unit="€/m²"
               onChange={(nextMin, nextMax) => onFiltersChange({ ...filters, ppm2Min: nextMin, ppm2Max: nextMax })}
             />
+
+            <PriceHistogram refs={allRefs} filterMin={filters.ppm2Min} filterMax={filters.ppm2Max} />
 
             {suggested && (
               <button

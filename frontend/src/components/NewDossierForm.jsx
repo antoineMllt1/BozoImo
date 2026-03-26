@@ -3,6 +3,7 @@ import { RADIUS_OPTIONS } from '../utils/constants';
 import { CONDITION_OPTIONS, DPE_OPTIONS, VIEW_QUALITY_OPTIONS } from '../utils/dossiers';
 import { stripDvfSnapshot, stripSelogerSnapshot } from '../utils/storage';
 import { estateTypesForTargetType, itemTypesForTargetType } from '../utils/propertyType';
+import NumberInput from './NumberInput';
 
 const METERS_PER_DEG_LAT = 111320;
 
@@ -37,6 +38,14 @@ function booleanChoices(value, setter) {
       ))}
     </div>
   );
+}
+
+function toNullableNumber(value) {
+  return value === '' ? null : Number(value);
+}
+
+function toFieldString(value) {
+  return value == null ? '' : String(value);
 }
 
 export default function NewDossierForm({ onCreated, onBack }) {
@@ -395,25 +404,27 @@ export default function NewDossierForm({ onCreated, onBack }) {
             <div className="form-row-3">
               <div className="form-field">
                 <label className="form-label">Surface habitable (m²)</label>
-                <input
-                  type="number"
-                  className="fp-input fp-wide"
-                  placeholder="Ex : 65"
-                  value={surface}
-                  onChange={event => setSurface(event.target.value)}
-                  min="5"
+                <NumberInput
+                  label="Surface habitable"
+                  min={5}
+                  step={0.5}
+                  size="md"
+                  value={toNullableNumber(surface)}
+                  placeholder="65"
+                  onChange={value => setSurface(toFieldString(value))}
                 />
               </div>
               <div className="form-field">
                 <label className="form-label">Nombre de pieces</label>
-                <input
-                  type="number"
-                  className="fp-input"
-                  placeholder="Ex : 3"
-                  value={rooms}
-                  onChange={event => setRooms(event.target.value)}
-                  min="1"
-                  max="20"
+                <NumberInput
+                  label="Nombre de pieces"
+                  min={1}
+                  max={20}
+                  step={1}
+                  size="sm"
+                  value={toNullableNumber(rooms)}
+                  placeholder="3"
+                  onChange={value => setRooms(toFieldString(value))}
                 />
               </div>
               <div className="form-field">
@@ -455,24 +466,26 @@ export default function NewDossierForm({ onCreated, onBack }) {
                 <div className="fp-group">
                   <span className="fp-lbl">Etage</span>
                   <div className="fp-range">
-                    <input
-                      type="number"
-                      className="fp-input"
-                      placeholder="Ex : 3"
-                      min="0"
-                      max="50"
-                      value={floor}
-                      onChange={event => setFloor(event.target.value)}
+                    <NumberInput
+                      label="Etage"
+                      min={0}
+                      max={50}
+                      step={1}
+                      size="sm"
+                      value={toNullableNumber(floor)}
+                      placeholder="3"
+                      onChange={value => setFloor(toFieldString(value))}
                     />
                     <span className="fp-dash">sur</span>
-                    <input
-                      type="number"
-                      className="fp-input"
+                    <NumberInput
+                      label="Etages total"
+                      min={1}
+                      max={50}
+                      step={1}
+                      size="sm"
+                      value={toNullableNumber(totalFloors)}
                       placeholder="Total"
-                      min="1"
-                      max="50"
-                      value={totalFloors}
-                      onChange={event => setTotalFloors(event.target.value)}
+                      onChange={value => setTotalFloors(toFieldString(value))}
                     />
                   </div>
                 </div>
@@ -568,14 +581,15 @@ export default function NewDossierForm({ onCreated, onBack }) {
 
                 <div className="fp-group">
                   <span className="fp-lbl">Annee construction</span>
-                  <input
-                    type="number"
-                    className="fp-input"
-                    placeholder="Ex : 1998"
-                    min="1800"
+                  <NumberInput
+                    label="Annee construction"
+                    min={1800}
                     max={new Date().getFullYear()}
-                    value={yearBuilt}
-                    onChange={event => setYearBuilt(event.target.value)}
+                    step={1}
+                    size="md"
+                    value={toNullableNumber(yearBuilt)}
+                    placeholder="1998"
+                    onChange={value => setYearBuilt(toFieldString(value))}
                   />
                 </div>
 

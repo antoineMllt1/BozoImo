@@ -7,10 +7,13 @@ import { saveModel } from '../utils/storage';
 import { exportDossierPdf } from '../utils/report';
 import { fmtDate } from '../utils/formatters';
 import { estateTypesForTargetType, itemTypesForTargetType, matchesTargetPropertyType } from '../utils/propertyType';
+import { buildTrendFromRefs } from '../utils/trend';
 import DataWorkbench from './DataWorkbench';
 import AnalystWorkbench from './AnalystWorkbench';
 import AlgoWorkbench from './AlgoWorkbench';
 import NeighborhoodWorkbench from './NeighborhoodWorkbench';
+import SyntheseView from './SyntheseView';
+import Dropdown from './Dropdown';
 import GdpView from './GdpView';
 
 const STATUS_LABEL = {
@@ -91,6 +94,7 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
   const [exporting, setExporting] = useState(false);
   const [neighborhoodReloading, setNeighborhoodReloading] = useState(false);
   const [neighborhoodError, setNeighborhoodError] = useState('');
+  const [disabledFactors, setDisabledFactors] = useState(dossier.disabledFactors || {});
   const [iqrApplied, setIqrApplied] = useState(
     dossier.analystFilters?.ppm2Min != null || dossier.analystFilters?.ppm2Max != null
   );
@@ -164,6 +168,11 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
 
   const areaScores = mlEstimate?.areaScores || computeAreaScores(dossier.areaContext || null);
 
+  const trend = useMemo(
+    () => buildTrendFromRefs(allRefs, mlEstimate?.correctedPm2),
+    [allRefs, mlEstimate?.correctedPm2]
+  );
+
   const persistFilters = useCallback((nextFilters) => {
     setFilters(nextFilters);
     setIqrApplied(true);
@@ -185,26 +194,82 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
     persistDossier({ analystAdjustments: nextAdjustments }, guessWorkStatus(dossier.status));
   }, [dossier.status, persistDossier]);
 
+  const fetchEnrichData = useCallback(async (lat, lng) => {
+    try {
+      const response = await fetch('/api/enrich', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lat, lng }),
+      });
+      const data = await response.json();
+      return response.ok ? data : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const enrichAreaSilent = useCallback(async () => {
+    if (!dossier.lat || !dossier.lng) return;
+    const data = await fetchEnrichData(dossier.lat, dossier.lng);
+    if (!data) return;
+    const prev = dossier.areaContext || {};
+    persistDossier({
+      areaContext: {
+        ...prev,
+        fetchedAt: prev.fetchedAt || new Date().toISOString(),
+        location: prev.location || { lat: dossier.lat, lng: dossier.lng },
+        transport: data.transport ?? prev.transport,
+        schools: data.schools ?? prev.schools,
+        amenities: data.amenities ?? prev.amenities,
+        risks: data.risks ?? prev.risks,
+        noise: data.noise ?? prev.noise,
+      },
+    }, guessWorkStatus(dossier.status));
+  }, [dossier.areaContext, dossier.lat, dossier.lng, dossier.status, fetchEnrichData, persistDossier]);
+
   const handleReloadNeighborhood = useCallback(async () => {
     if (neighborhoodReloading || dossier.lat == null || dossier.lng == null) return;
 
     setNeighborhoodError('');
     setNeighborhoodReloading(true);
     try {
-      const data = await requestNeighborhoodProfile({
-        lat: dossier.lat,
-        lng: dossier.lng,
-        address: dossier.geocodedAddress || dossier.address || null,
-      });
-      if (!data?.success || !data?.villesAVivre) return;
-      persistDossier({
-        areaContext: {
-          ...(dossier.areaContext || {}),
-          fetchedAt: dossier.areaContext?.fetchedAt || new Date().toISOString(),
-          location: dossier.areaContext?.location || { lat: dossier.lat, lng: dossier.lng },
-          villesAVivre: data.villesAVivre,
-        },
-      }, guessWorkStatus(dossier.status));
+      // Run both API calls in parallel
+      const [neighborhoodResult, enrichResult] = await Promise.allSettled([
+        requestNeighborhoodProfile({
+          lat: dossier.lat,
+          lng: dossier.lng,
+          address: dossier.geocodedAddress || dossier.address || null,
+        }),
+        fetchEnrichData(dossier.lat, dossier.lng),
+      ]);
+
+      const neighborhoodData = neighborhoodResult.status === 'fulfilled' ? neighborhoodResult.value : null;
+      const enrichData = enrichResult.status === 'fulfilled' ? enrichResult.value : null;
+
+      if (!neighborhoodData?.success && !neighborhoodData?.villesAVivre && !enrichData) {
+        setNeighborhoodError('Aucune donnee recue.');
+        return;
+      }
+
+      const prev = dossier.areaContext || {};
+      const merged = {
+        ...prev,
+        fetchedAt: prev.fetchedAt || new Date().toISOString(),
+        location: prev.location || { lat: dossier.lat, lng: dossier.lng },
+      };
+
+      if (neighborhoodData?.success && neighborhoodData?.villesAVivre) {
+        merged.villesAVivre = neighborhoodData.villesAVivre;
+      }
+      if (enrichData) {
+        merged.transport = enrichData.transport ?? prev.transport;
+        merged.schools = enrichData.schools ?? prev.schools;
+        merged.amenities = enrichData.amenities ?? prev.amenities;
+        merged.risks = enrichData.risks ?? prev.risks;
+        merged.noise = enrichData.noise ?? prev.noise;
+      }
+
+      persistDossier({ areaContext: merged }, guessWorkStatus(dossier.status));
     } catch (error) {
       if (error?.status === 404) {
         setNeighborhoodError('API Villes a vivre introuvable. Redemarre le backend.');
@@ -214,7 +279,34 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
     } finally {
       setNeighborhoodReloading(false);
     }
-  }, [dossier.areaContext, dossier.lat, dossier.lng, dossier.status, neighborhoodReloading, persistDossier]);
+  }, [dossier.areaContext, dossier.lat, dossier.lng, dossier.geocodedAddress, dossier.address, dossier.status, fetchEnrichData, neighborhoodReloading, persistDossier]);
+
+  const handleTargetChange = useCallback((nextTarget) => {
+    persistDossier({ target: nextTarget }, guessWorkStatus(dossier.status));
+  }, [dossier.status, persistDossier]);
+
+  const handleDisabledFactorsChange = useCallback((nextDisabled) => {
+    setDisabledFactors(nextDisabled);
+    persistDossier({ disabledFactors: nextDisabled }, guessWorkStatus(dossier.status));
+  }, [dossier.status, persistDossier]);
+
+  // Auto-enrich when area context has no transport/schools data
+  useEffect(() => {
+    if (!dossier.lat || !dossier.lng) return;
+    const ctx = dossier.areaContext;
+    if (ctx?.transport || ctx?.schools || ctx?.amenities) return;
+    enrichAreaSilent();
+  }, [dossier.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleCoverPhoto = useCallback((event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      persistDossier({ coverPhoto: { dataUrl: reader.result, name: file.name } }, dossier.status);
+    };
+    reader.readAsDataURL(file);
+  }, [dossier.status, persistDossier]);
 
   const handleManualEstimate = useCallback((value) => {
     setManualEstimate(value);
@@ -360,7 +452,7 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
         estimate: mlEstimate,
         metrics,
         filteredRefs: filtered,
-        trend: null,
+        trend,
         logoDataUrl: dossier.reportBrandLogo?.dataUrl || null,
         chartNodes: { mapNode: tab === 'data' ? exportMapRef.current : null },
       });
@@ -397,17 +489,22 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
           </div>
         </div>
         <div className="ws-header-actions">
-          <select
-            className="ws-status-select"
+          <Dropdown
+            className="ws-status-select dd-status"
             value={dossier.status}
-            onChange={(event) => persistDossier({}, event.target.value)}
-          >
-            <option value="draft">Brouillon</option>
-            <option value="in_progress">En cours</option>
-            <option value="estimated">Estimé</option>
-            <option value="confirmed">Confirmé</option>
-            <option value="archived">Archivé</option>
-          </select>
+            onChange={(v) => persistDossier({}, v)}
+            options={[
+              { value: 'draft', label: 'Brouillon' },
+              { value: 'in_progress', label: 'En cours' },
+              { value: 'estimated', label: 'Estimé' },
+              { value: 'confirmed', label: 'Confirmé' },
+              { value: 'archived', label: 'Archivé' },
+            ]}
+          />
+          <label className="topbar-btn topbar-btn-photo">
+            {dossier.coverPhoto ? 'Changer photo' : 'Photo'}
+            <input type="file" accept="image/*" hidden onChange={handleCoverPhoto} />
+          </label>
           <button className="topbar-btn topbar-btn-primary" onClick={handleExportPdf} disabled={exporting}>
             {exporting ? 'Génération...' : 'Exporter PDF'}
           </button>
@@ -428,6 +525,7 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
         <button className={`clean-tab ${tab === 'neighborhood' ? 'active' : ''}`} onClick={() => setTab('neighborhood')}>Quartier</button>
         <button className={`clean-tab ${tab === 'analyst' ? 'active' : ''}`} onClick={() => setTab('analyst')}>Analyste</button>
         <button className={`clean-tab ${tab === 'algo' ? 'active' : ''}`} onClick={() => setTab('algo')}>Algo</button>
+        <button className={`clean-tab ${tab === 'synthese' ? 'active' : ''}`} onClick={() => setTab('synthese')}>Synthèse</button>
         {isBuilding && (
           <button className={`clean-tab ${tab === 'gdp' ? 'active' : ''}`} onClick={() => setTab('gdp')}>Grille</button>
         )}
@@ -481,6 +579,7 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
             onBaseChange={handleAnalystBaseChange}
             onAdjustmentsChange={handleAnalystAdjustmentsChange}
             onApplyEstimate={handleManualEstimate}
+            onTargetChange={handleTargetChange}
           />
         )}
 
@@ -490,8 +589,23 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
             filteredRefs={filtered}
             model={model}
             target={target}
+            onTargetChange={handleTargetChange}
             onConfirm={handleConfirm}
             alreadyConfirmed={dossier.confirmed}
+            disabledFactors={disabledFactors}
+            onDisabledFactorsChange={handleDisabledFactorsChange}
+          />
+        )}
+
+        {tab === 'synthese' && (
+          <SyntheseView
+            dossier={dossier}
+            mlEstimate={mlEstimate}
+            manualEstimate={manualEstimate}
+            metrics={metrics}
+            areaScores={areaScores}
+            trend={trend}
+            filteredRefs={filtered}
           />
         )}
 

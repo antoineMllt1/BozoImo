@@ -18,9 +18,6 @@ export default function CommandPalette({
       { id: 'go_home', label: 'Accueil', hint: 'Retour a la liste des dossiers', type: 'action', payload: { type: 'home' } },
       { id: 'new_dossier', label: 'Nouvelle analyse', hint: 'Creer un nouveau dossier', type: 'action', payload: { type: 'new' } },
       { id: 'quick_collect', label: 'Collecte rapide', hint: 'Lancer une collecte seule', type: 'action', payload: { type: 'scrape' } },
-      { id: 'density_compact', label: 'Densite compacte', hint: 'Tables plus serrees', type: 'action', payload: { type: 'density', value: 'compact' } },
-      { id: 'density_regular', label: 'Densite reguliere', hint: 'Densite par defaut', type: 'action', payload: { type: 'density', value: 'regular' } },
-      { id: 'density_comfort', label: 'Densite confortable', hint: 'Espacement plus aere', type: 'action', payload: { type: 'density', value: 'comfortable' } },
       { id: 'toggle_sidebar', label: 'Basculer la barre laterale', hint: 'Mode compact ou etendu', type: 'action', payload: { type: 'toggle_sidebar' } },
     ];
 

@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { DEFAULT_COEFFICIENTS, VUE_OPTIONS, ETAT_OPTIONS, computeLot, computeSurfacePonderee } from '../utils/gdp';
 import { fmtK, fmtPm2 } from '../utils/formatters';
+import Dropdown from './Dropdown';
+import ExampleNumberField from './ui/number-field-1';
 
 const TYPES = ['T1','T2','T3','T4','T5'];
 const DPELIST = ['A','B','C','D','E','F','G'];
@@ -12,6 +14,32 @@ function Row({ label, children }) {
       <label className="glm-label">{label}</label>
       <div className="glm-ctrl">{children}</div>
     </div>
+  );
+}
+
+function CompactNumberField({
+  label,
+  value,
+  onValueChange,
+  min,
+  max,
+  step = 1,
+  placeholder,
+  size = 'md',
+}) {
+  return (
+    <ExampleNumberField
+      label={label}
+      compact
+      showScrubArea={false}
+      size={size}
+      min={min}
+      max={max}
+      step={step}
+      value={value ?? null}
+      placeholder={placeholder}
+      onValueChange={onValueChange}
+    />
   );
 }
 
@@ -55,16 +83,16 @@ export default function GdpLotModal({ lot: initLot, prixPivot, coefficients = DE
 
             <div className="glm-section">Surface</div>
             <Row label="SHAB (m²)">
-              <input type="number" className="glm-input glm-input-sm" value={lot.SHAB ?? ''} onChange={e => f('SHAB', e.target.value ? +e.target.value : null)} />
+              <CompactNumberField label="SHAB" value={lot.SHAB} onValueChange={value => f('SHAB', value)} />
             </Row>
             <Row label="Surface ext. (m²)">
-              <input type="number" className="glm-input glm-input-sm" value={lot.surface_ext ?? 0} onChange={e => f('surface_ext', +e.target.value)} />
+              <CompactNumberField label="Surface exterieure" value={lot.surface_ext ?? 0} onValueChange={value => f('surface_ext', value ?? 0)} />
               {lot.SHAB && <span className="glm-hint">Pondérée : {computeSurfacePonderee(lot.SHAB, lot.surface_ext).toFixed(1)} m²</span>}
             </Row>
 
             <div className="glm-section">Coefficients</div>
             <Row label="Étage">
-              <input type="number" min="0" max="20" className="glm-input glm-input-sm" value={lot.floor ?? 0} onChange={e => f('floor', +e.target.value)} />
+              <CompactNumberField label="Etage" min={0} max={20} value={lot.floor ?? 0} onValueChange={value => f('floor', value ?? 0)} />
             </Row>
             <Row label="Orientation">
               <div className="ef-chips">
@@ -86,29 +114,39 @@ export default function GdpLotModal({ lot: initLot, prixPivot, coefficients = DE
               {(lot.dpe === 'F' || lot.dpe === 'G') && <div className="glm-alert glm-alert-danger">⚠️ Passoire thermique</div>}
             </Row>
             <Row label="Vue">
-              <select className="glm-select" value={lot.vue ?? ''} onChange={e => f('vue', e.target.value || null)}>
-                <option value="">— Non renseigné</option>
-                {VUE_OPTIONS.map(v => <option key={v} value={v}>{v} (×{DEFAULT_COEFFICIENTS.vue[v].toFixed(2)})</option>)}
-              </select>
+              <Dropdown
+                className="glm-select"
+                value={lot.vue ?? ''}
+                onChange={v => f('vue', v || null)}
+                options={[
+                  { value: '', label: '— Non renseigné' },
+                  ...VUE_OPTIONS.map(v => ({ value: v, label: `${v} (×${DEFAULT_COEFFICIENTS.vue[v].toFixed(2)})` })),
+                ]}
+              />
             </Row>
             <Row label="État">
-              <select className="glm-select" value={lot.etat ?? ''} onChange={e => f('etat', e.target.value || null)}>
-                <option value="">— Non renseigné</option>
-                {ETAT_OPTIONS.map(e => <option key={e} value={e}>{e} (×{DEFAULT_COEFFICIENTS.etat[e].toFixed(2)})</option>)}
-              </select>
+              <Dropdown
+                className="glm-select"
+                value={lot.etat ?? ''}
+                onChange={v => f('etat', v || null)}
+                options={[
+                  { value: '', label: '— Non renseigné' },
+                  ...ETAT_OPTIONS.map(e => ({ value: e, label: `${e} (×${DEFAULT_COEFFICIENTS.etat[e].toFixed(2)})` })),
+                ]}
+              />
             </Row>
 
             <div className="glm-section">Parking & Travaux</div>
             <Row label="Nb parkings">
-              <input type="number" min="0" className="glm-input glm-input-sm" value={lot.parking_count ?? 0} onChange={e => f('parking_count', +e.target.value)} />
+              <CompactNumberField label="Nombre de parkings" min={0} value={lot.parking_count ?? 0} onValueChange={value => f('parking_count', value ?? 0)} />
             </Row>
             {lot.parking_count > 0 && (
               <Row label="Prix / parking (€)">
-                <input type="number" min="0" className="glm-input glm-input-sm" value={lot.parking_unit_price ?? 0} onChange={e => f('parking_unit_price', +e.target.value)} />
+                <CompactNumberField label="Prix par parking" min={0} value={lot.parking_unit_price ?? 0} onValueChange={value => f('parking_unit_price', value ?? 0)} />
               </Row>
             )}
             <Row label="Travaux estimés (€)">
-              <input type="number" min="0" className="glm-input glm-input-sm" value={lot.travaux_estime ?? 0} onChange={e => f('travaux_estime', +e.target.value)} />
+              <CompactNumberField label="Travaux estimes" min={0} value={lot.travaux_estime ?? 0} onValueChange={value => f('travaux_estime', value ?? 0)} />
             </Row>
 
             <div className="glm-section">
@@ -120,17 +158,17 @@ export default function GdpLotModal({ lot: initLot, prixPivot, coefficients = DE
             </div>
             {lot.isOccupied && (<>
               <Row label="Loyer en place (€/mois)">
-                <input type="number" className="glm-input glm-input-sm" value={lot.loyer_en_place ?? ''} onChange={e => f('loyer_en_place', +e.target.value)} />
+                <CompactNumberField label="Loyer en place" min={0} value={lot.loyer_en_place} onValueChange={value => f('loyer_en_place', value ?? 0)} />
               </Row>
               <Row label="Loyer marché estimé (€/mois)">
-                <input type="number" className="glm-input glm-input-sm" value={lot.loyer_marche_estime ?? ''} onChange={e => f('loyer_marche_estime', +e.target.value)} />
+                <CompactNumberField label="Loyer marche estime" min={0} value={lot.loyer_marche_estime} onValueChange={value => f('loyer_marche_estime', value ?? 0)} />
               </Row>
               <Row label="Âge locataire">
-                <input type="number" className="glm-input glm-input-sm" value={lot.age_locataire ?? ''} onChange={e => f('age_locataire', e.target.value ? +e.target.value : null)} />
+                <CompactNumberField label="Age locataire" min={0} value={lot.age_locataire} onValueChange={value => f('age_locataire', value)} />
                 {lot.age_locataire > 59 && <div className="glm-alert glm-alert-danger">⚠️ Locataire protégé — Loi 89 renforcée</div>}
               </Row>
               <Row label="Décote durée (%)">
-                <input type="number" min="0" max="30" step="1" className="glm-input glm-input-sm" value={Math.round((lot.decote_duree ?? 0) * 100)} onChange={e => f('decote_duree', +e.target.value / 100)} />
+                <CompactNumberField label="Decote duree" min={0} max={30} step={1} value={Math.round((lot.decote_duree ?? 0) * 100)} onValueChange={value => f('decote_duree', (value ?? 0) / 100)} />
               </Row>
             </>)}
           </div>

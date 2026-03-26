@@ -81,3 +81,54 @@ export function buildQuarterlyTrend(features = [], currentEstimatePm2 = null) {
     currentEstimatePm2: currentEstimatePm2 ? Math.round(currentEstimatePm2) : null,
   };
 }
+
+// Build trend from normalized refs (DVF only — real transactions with dates)
+export function buildTrendFromRefs(refs = [], currentEstimatePm2 = null) {
+  const buckets = new Map();
+
+  for (const ref of refs) {
+    if (ref.source !== 'dvf' || !ref.ppm2 || ref.ppm2 <= 0 || !ref.date) continue;
+    const date = new Date(ref.date);
+    if (Number.isNaN(date.getTime())) continue;
+    const quarterDate = toQuarterDate(date);
+    const key = quarterDate.toISOString();
+    const existing = buckets.get(key) || { date: quarterDate, values: [] };
+    existing.values.push(ref.ppm2);
+    buckets.set(key, existing);
+  }
+
+  const series = [...buckets.values()]
+    .sort((a, b) => a.date - b.date)
+    .map(entry => ({
+      key: entry.date.toISOString(),
+      date: entry.date,
+      label: quarterLabel(entry.date),
+      ppm2: Math.round(median(entry.values)),
+      count: entry.values.length,
+    }));
+
+  const recent = series.slice(-8);
+  const regression = linearRegression(recent.map((point, index) => ({ x: index, y: point.ppm2 })));
+  const forecast = [];
+
+  if (regression && recent.length >= 2) {
+    const last = series[series.length - 1];
+    for (let step = 1; step <= 4; step += 1) {
+      const nextDate = new Date(last.date.getFullYear(), last.date.getMonth() + step * 3, 1);
+      const ppm2 = Math.round(regression.intercept + regression.slope * (recent.length - 1 + step));
+      forecast.push({
+        key: `${nextDate.toISOString()}_forecast`,
+        date: nextDate,
+        label: quarterLabel(nextDate),
+        ppm2: Math.max(0, ppm2),
+        forecast: true,
+      });
+    }
+  }
+
+  return {
+    series,
+    forecast,
+    currentEstimatePm2: currentEstimatePm2 ? Math.round(currentEstimatePm2) : null,
+  };
+}
