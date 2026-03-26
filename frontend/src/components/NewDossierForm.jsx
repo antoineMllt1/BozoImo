@@ -1,7 +1,17 @@
 import { useState, useRef } from 'react';
 import { RADIUS_OPTIONS } from '../utils/constants';
 import { CONDITION_OPTIONS, DPE_OPTIONS, VIEW_QUALITY_OPTIONS } from '../utils/dossiers';
-import { stripDvfSnapshot, stripSelogerSnapshot } from '../utils/storage';
+import {
+  stripBuildingProfile,
+  stripCadastreSnapshot,
+  stripDpeSnapshot,
+  stripDvfPlusSnapshot,
+  stripDvfSnapshot,
+  stripMarketIndicatorsSnapshot,
+  stripPappersSnapshot,
+  stripRiskProfile,
+  stripSelogerSnapshot,
+} from '../utils/storage';
 import { estateTypesForTargetType, itemTypesForTargetType } from '../utils/propertyType';
 import NumberInput from './NumberInput';
 
@@ -107,11 +117,13 @@ export default function NewDossierForm({ onCreated, onBack }) {
 
     let lat;
     let lng;
+    let codeInsee = null;
     let geocodedLabel = address.trim();
 
+    // ── Step 1: Geocode via BAN (with fallback to MeilleursAgents) ──
     try {
       setStep("Geocodage de l'adresse...");
-      const geocodeResponse = await fetch('/api/immobilier/geocode', {
+      const geocodeResponse = await fetch('/api/ban/geocode', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address: address.trim() }),
@@ -121,69 +133,105 @@ export default function NewDossierForm({ onCreated, onBack }) {
       if (!place) throw new Error('Adresse introuvable');
       lat = place._geoloc.lat;
       lng = place._geoloc.lng;
+      codeInsee = place.citycode || null;
       geocodedLabel = place.value || address.trim();
     } catch (err) {
-      setLoading(false);
-      setError(`Geocodage impossible : ${err.message}`);
-      return;
+      // Fallback to MeilleursAgents geocoding if BAN fails
+      try {
+        const geocodeResponse = await fetch('/api/immobilier/geocode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ address: address.trim() }),
+        });
+        const geocodeData = await geocodeResponse.json();
+        const place = geocodeData.response?.places?.[0];
+        if (!place) throw new Error('Adresse introuvable');
+        lat = place._geoloc.lat;
+        lng = place._geoloc.lng;
+        geocodedLabel = place.value || address.trim();
+      } catch (err2) {
+        setLoading(false);
+        setError(`Geocodage impossible : ${err2.message}`);
+        return;
+      }
     }
 
-    setStep('Collecte SeLoger, DVF et contexte quartier principal...');
-    const [selogerResult, dvfResult, enrichResult] = await Promise.allSettled([
-      fetch('/api/seloger/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lat, lng, radius, filters: { size: 100, estateTypes: estateTypesForTargetType(type) } }),
-      }).then(safeJson),
-      fetch('/api/immobilier/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          bounds: radiusToBounds(lat, lng, radius),
-          roomCount: [],
-          itemTypes: itemTypesForTargetType(type),
-        }),
-      }).then(safeJson),
-      fetch('/api/enrich', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lat, lng }),
-      }).then(safeJson),
+    // ── Step 2: Parallel fetch — all data sources ──
+    setStep('Collecte des donnees (SeLoger, DVF, DPE, risques, cadastre, quartier)...');
+    const jsonPost = (url, body) => fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(safeJson);
+
+    const [
+      selogerResult, dvfResult, enrichResult,
+      dvfPlusResult, dpeResult, riskResult,
+      pappersResult, cadastreResult, buildingResult,
+      indicatorsResult,
+    ] = await Promise.allSettled([
+      // Existing sources
+      jsonPost('/api/seloger/search', { lat, lng, radius, filters: { size: 100, estateTypes: estateTypesForTargetType(type) } }),
+      jsonPost('/api/immobilier/search', { bounds: radiusToBounds(lat, lng, radius), roomCount: [], itemTypes: itemTypesForTargetType(type) }),
+      jsonPost('/api/enrich', { lat, lng }),
+      // New sources
+      codeInsee ? jsonPost('/api/dvfplus/search', { bounds: radiusToBounds(lat, lng, radius), codeCommune: codeInsee }) : Promise.resolve(null),
+      jsonPost('/api/dpe/search', { lat, lng, distance: radius }),
+      codeInsee ? jsonPost('/api/georisques/profile', { lat, lng, codeInsee }) : Promise.resolve(null),
+      jsonPost('/api/pappers/search', { lat, lng, distance: radius, codeInsee }),
+      codeInsee ? jsonPost('/api/cadastre/parcelle', { lat, lng, codeInsee }) : Promise.resolve(null),
+      jsonPost('/api/cadastre/building', { lat, lng, distance: 200 }),
+      codeInsee ? jsonPost('/api/dvfplus/indicators', { codeCommune: codeInsee }) : Promise.resolve(null),
     ]);
 
-    const selogerSnapshot =
-      selogerResult.status === 'fulfilled' && !selogerResult.value?.error
-        ? { data: stripSelogerSnapshot(selogerResult.value), fetchedAt: new Date().toISOString() }
-        : {
-            error:
-              selogerResult.status === 'rejected'
-                ? selogerResult.reason.message
-                : selogerResult.value?.error || 'Erreur SeLoger',
-          };
+    // ── Step 3: Extract results with graceful degradation ──
+    const ok = (r) => r.status === 'fulfilled' && r.value && r.value.success !== false && !r.value.error;
+    const errMsg = (r) => r.status === 'rejected' ? r.reason?.message : r.value?.error || 'Erreur';
+    const fetchedAt = new Date().toISOString();
+
+    const selogerSnapshot = ok(selogerResult)
+      ? { data: stripSelogerSnapshot(selogerResult.value), fetchedAt }
+      : { error: errMsg(selogerResult) };
 
     let dvfRaw = null;
     if (dvfResult.status === 'fulfilled' && dvfResult.value?.success) {
       dvfRaw = stripDvfSnapshot(dvfResult.value.data);
     }
-
     const dvfSnapshot = dvfRaw
-      ? { data: dvfRaw, fetchedAt: new Date().toISOString(), radiusMeters: radius }
-      : {
-          error:
-            dvfResult.status === 'rejected'
-              ? dvfResult.reason.message
-              : dvfResult.value?.error || 'Erreur DVF',
-        };
+      ? { data: dvfRaw, fetchedAt, radiusMeters: radius }
+      : { error: errMsg(dvfResult) };
 
-    const areaContext =
-      enrichResult.status === 'fulfilled' && enrichResult.value?.success
-        ? enrichResult.value.context
-        : {
-            error:
-              enrichResult.status === 'rejected'
-                ? enrichResult.reason.message
-                : enrichResult.value?.error || 'Erreur enrichissement',
-          };
+    const areaContext = enrichResult.status === 'fulfilled' && enrichResult.value?.success
+      ? enrichResult.value.context
+      : { error: errMsg(enrichResult) };
+
+    const dvfPlusSnapshot = ok(dvfPlusResult)
+      ? stripDvfPlusSnapshot({ ...dvfPlusResult.value, fetchedAt })
+      : null;
+
+    const dpeSnapshot = ok(dpeResult)
+      ? stripDpeSnapshot({ ...dpeResult.value, fetchedAt })
+      : null;
+
+    const riskProfile = ok(riskResult)
+      ? stripRiskProfile({ ...riskResult.value, fetchedAt })
+      : null;
+
+    const pappersSnapshot = ok(pappersResult)
+      ? stripPappersSnapshot({ ...pappersResult.value, fetchedAt })
+      : null;
+
+    const parcelleInfo = ok(cadastreResult)
+      ? stripCadastreSnapshot({ ...cadastreResult.value, fetchedAt })
+      : null;
+
+    const buildingProfile = ok(buildingResult)
+      ? stripBuildingProfile({ ...buildingResult.value, fetchedAt })
+      : null;
+
+    const marketIndicators = ok(indicatorsResult)
+      ? stripMarketIndicatorsSnapshot({ ...indicatorsResult.value, fetchedAt })
+      : null;
 
     const dossier = {
       id: crypto.randomUUID ? crypto.randomUUID() : `dos_${Date.now()}`,
@@ -194,6 +242,7 @@ export default function NewDossierForm({ onCreated, onBack }) {
       geocodedAddress: geocodedLabel,
       lat,
       lng,
+      codeInsee,
       radiusMeters: radius,
       target: {
         surfaceM2: surface ? +surface : null,
@@ -218,6 +267,15 @@ export default function NewDossierForm({ onCreated, onBack }) {
       selogerSnapshot,
       dvfSnapshot,
       areaContext,
+      dvfPlusSnapshot,
+      dpeSnapshot,
+      riskProfile,
+      pappersSnapshot,
+      parcelleInfo,
+      buildingProfile,
+      marketIndicators,
+      priceHistory: null,   // Castorus fetched separately (slower, optional)
+      negotiation: null,    // Computed after all data is in
       selectedComps: [],
       lastEstimate: null,
       confirmed: null,

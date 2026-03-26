@@ -1,3 +1,14 @@
+import {
+  normalizeBuildingProfile,
+  normalizeCadastreSnapshot,
+  normalizeCastorusSnapshot,
+  normalizeDpeSnapshot,
+  normalizeDvfPlusSnapshot,
+  normalizeMarketIndicators,
+  normalizePappersSnapshot,
+  normalizeRiskProfile,
+} from './enrichment';
+
 export const EMPTY_LOT_MIX = Object.freeze({
   T1: 0,
   T2: 0,
@@ -248,6 +259,19 @@ export function normalizeDossier(dossier = {}) {
     coverPhoto,
     reportBrandLogo,
     archivedAt,
+
+    // ── New enrichment snapshots (nullable, backward-compatible) ──
+    codeInsee: dossier.codeInsee || null,
+    dvfPlusSnapshot: normalizeDvfPlusSnapshot(dossier.dvfPlusSnapshot),
+    dpeSnapshot: normalizeDpeSnapshot(dossier.dpeSnapshot),
+    riskProfile: normalizeRiskProfile(dossier.riskProfile),
+    buildingProfile: normalizeBuildingProfile(dossier.buildingProfile),
+    parcelleInfo: normalizeCadastreSnapshot(dossier.parcelleInfo),
+    coproProfile: dossier.coproProfile || null,
+    marketIndicators: normalizeMarketIndicators(dossier.marketIndicators),
+    priceHistory: normalizeCastorusSnapshot(dossier.priceHistory),
+    pappersSnapshot: normalizePappersSnapshot(dossier.pappersSnapshot),
+    negotiation: dossier.negotiation || null,
   };
 }
 

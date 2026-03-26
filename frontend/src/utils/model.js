@@ -456,17 +456,13 @@ function buildAdjustments(target, areaContext) {
   const gardenAdj = gardenFactor(target?.hasGarden ?? null, target?.type ?? null);
   const duplexAdj = duplexFactor(target?.isDuplex ?? null);
 
+  // Neighbourhood scores are computed for DISPLAY ONLY (radar chart, info tabs).
+  // They must NOT influence the price estimate because the comparables already
+  // come from the same area, so their €/m² already reflects neighbourhood quality.
+  // Only hard risk/noise factors are kept when a concrete hazard is detected.
   const rawContextAdjustments = [
-    transitFactor(areaContext),
-    schoolFactor(areaContext),
-    amenityContextFactor(areaContext),
     riskFactor(areaContext),
     noiseFactor(areaContext),
-    safetyContextFactor(areaContext),
-    servicesContextFactor(areaContext),
-    incomeFactor(areaContext),
-    liveabilityFactor(areaContext),
-    areaScores.neighborhoodPremium,
   ];
 
   const charAdjustments = [

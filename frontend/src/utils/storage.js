@@ -1,6 +1,16 @@
 import { normalizeDossier } from './dossiers';
 import { analyzeListingText } from './nlp';
 import { inferPropertyType } from './propertyType';
+import {
+  normalizeBuildingProfile,
+  normalizeCadastreSnapshot,
+  normalizeCastorusSnapshot,
+  normalizeDpeSnapshot,
+  normalizeDvfPlusSnapshot,
+  normalizeMarketIndicators,
+  normalizePappersSnapshot,
+  normalizeRiskProfile,
+} from './enrichment';
 
 const DOSSIERS_KEY = 'estimia_dossiers_v1';
 const MODEL_KEY = 'estimia_model_v1';
@@ -277,4 +287,38 @@ export function stripDvfFeature(feature) {
 export function stripDvfSnapshot(data) {
   if (!data?.features) return data;
   return { ...data, features: data.features.map(stripDvfFeature) };
+}
+
+export function stripDvfPlusSnapshot(data) {
+  return normalizeDvfPlusSnapshot(data);
+}
+
+// ── Strip functions for new data sources (keep localStorage small) ──
+
+export function stripDpeSnapshot(data) {
+  return normalizeDpeSnapshot(data);
+}
+
+export function stripRiskProfile(data) {
+  return normalizeRiskProfile(data);
+}
+
+export function stripPappersSnapshot(data) {
+  return normalizePappersSnapshot(data);
+}
+
+export function stripMarketIndicatorsSnapshot(data) {
+  return normalizeMarketIndicators(data);
+}
+
+export function stripCadastreSnapshot(data) {
+  return normalizeCadastreSnapshot(data);
+}
+
+export function stripBuildingProfile(data) {
+  return normalizeBuildingProfile(data);
+}
+
+export function stripCastorusSnapshot(data) {
+  return normalizeCastorusSnapshot(data);
 }
