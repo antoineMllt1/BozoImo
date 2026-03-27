@@ -1,3 +1,4 @@
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
@@ -9,8 +10,8 @@ const PORT = process.env.PORT || 5000;
 
 // Middlewares
 app.use(cors()); // Permettre les requêtes depuis le frontend
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Logger middleware (optionnel)
 app.use((req, res, next) => {

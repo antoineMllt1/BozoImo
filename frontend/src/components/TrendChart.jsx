@@ -20,7 +20,7 @@ export default function TrendChart({ trend, compact = false }) {
       <div className="viz-card trend-card">
         <div className="viz-card-header">
           <div>
-            <h3>Evolution trimestrielle</h3>
+            <h3>Evolution annuelle</h3>
             <p>Pas assez de transactions DVF pour tracer une tendance fiable.</p>
           </div>
         </div>
@@ -87,8 +87,8 @@ export default function TrendChart({ trend, compact = false }) {
     <div className="viz-card trend-card">
       <div className="viz-card-header">
         <div>
-          <h3>Evolution trimestrielle</h3>
-          <p>Medianes DVF par trimestre avec projection simple sur les 4 prochains trimestres.</p>
+          <h3>Evolution annuelle</h3>
+          <p>Médianes DVF par année avec projection sur les 3 prochaines années.</p>
         </div>
         <div className="viz-card-meta">
           <span>{series[0].label}</span>
@@ -145,7 +145,7 @@ export default function TrendChart({ trend, compact = false }) {
         {actualCoords.map(point => (
           <g key={point.key}>
             <circle cx={point.x} cy={point.y} r="4.5" className="trend-point" />
-            <text x={point.x} y={height - 6} textAnchor="middle" className="trend-quarter-label">
+            <text x={point.x} y={height - 6} textAnchor="middle" className="trend-year-label">
               {point.label}
             </text>
           </g>
@@ -154,7 +154,7 @@ export default function TrendChart({ trend, compact = false }) {
         {forecastCoords.map(point => (
           <g key={point.key}>
             <circle cx={point.x} cy={point.y} r="4" className="trend-point trend-point-forecast" />
-            <text x={point.x} y={height - 6} textAnchor="middle" className="trend-quarter-label">
+            <text x={point.x} y={height - 6} textAnchor="middle" className="trend-year-label">
               {point.label}
             </text>
           </g>

@@ -1,7 +1,5 @@
-function quarterLabel(date) {
-  const year = date.getFullYear();
-  const quarter = Math.floor(date.getMonth() / 3) + 1;
-  return `T${quarter} ${year}`;
+function yearLabel(date) {
+  return String(date.getFullYear());
 }
 
 function median(values) {
@@ -11,9 +9,8 @@ function median(values) {
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 }
 
-function toQuarterDate(date) {
-  const quarter = Math.floor(date.getMonth() / 3);
-  return new Date(date.getFullYear(), quarter * 3, 1);
+function toYearDate(date) {
+  return new Date(date.getFullYear(), 0, 1);
 }
 
 function linearRegression(points) {
@@ -39,9 +36,9 @@ export function buildQuarterlyTrend(features = [], currentEstimatePm2 = null) {
     const date = new Date(props.sale_at);
     if (Number.isNaN(date.getTime())) continue;
     const ppm2 = props.updated_price / props.area;
-    const quarterDate = toQuarterDate(date);
-    const key = quarterDate.toISOString();
-    const existing = buckets.get(key) || { date: quarterDate, values: [] };
+    const yearDate = toYearDate(date);
+    const key = yearDate.toISOString();
+    const existing = buckets.get(key) || { date: yearDate, values: [] };
     existing.values.push(ppm2);
     buckets.set(key, existing);
   }
@@ -51,25 +48,24 @@ export function buildQuarterlyTrend(features = [], currentEstimatePm2 = null) {
     .map(entry => ({
       key: entry.date.toISOString(),
       date: entry.date,
-      label: quarterLabel(entry.date),
+      label: yearLabel(entry.date),
       ppm2: Math.round(median(entry.values)),
       count: entry.values.length,
     }));
 
-  const recent = series.slice(-8);
-  const regression = linearRegression(recent.map((point, index) => ({ x: index, y: point.ppm2 })));
+  const regression = linearRegression(series.map((point, index) => ({ x: index, y: point.ppm2 })));
   const forecast = [];
 
-  if (regression && recent.length >= 2) {
+  if (regression && series.length >= 2) {
     const last = series[series.length - 1];
-    for (let step = 1; step <= 4; step += 1) {
-      const nextDate = new Date(last.date.getFullYear(), last.date.getMonth() + step * 3, 1);
-      const ppm2 = Math.round(regression.intercept + regression.slope * (recent.length - 1 + step));
+    for (let step = 1; step <= 3; step++) {
+      const nextDate = new Date(last.date.getFullYear() + step, 0, 1);
+      const ppm2 = Math.round(regression.intercept + regression.slope * (series.length - 1 + step));
       forecast.push({
         key: `${nextDate.toISOString()}_forecast`,
         date: nextDate,
-        label: quarterLabel(nextDate),
-        ppm2,
+        label: yearLabel(nextDate),
+        ppm2: Math.max(0, ppm2),
         forecast: true,
       });
     }
@@ -90,9 +86,9 @@ export function buildTrendFromRefs(refs = [], currentEstimatePm2 = null) {
     if (ref.source !== 'dvf' || !ref.ppm2 || ref.ppm2 <= 0 || !ref.date) continue;
     const date = new Date(ref.date);
     if (Number.isNaN(date.getTime())) continue;
-    const quarterDate = toQuarterDate(date);
-    const key = quarterDate.toISOString();
-    const existing = buckets.get(key) || { date: quarterDate, values: [] };
+    const yearDate = toYearDate(date);
+    const key = yearDate.toISOString();
+    const existing = buckets.get(key) || { date: yearDate, values: [] };
     existing.values.push(ref.ppm2);
     buckets.set(key, existing);
   }
@@ -102,24 +98,23 @@ export function buildTrendFromRefs(refs = [], currentEstimatePm2 = null) {
     .map(entry => ({
       key: entry.date.toISOString(),
       date: entry.date,
-      label: quarterLabel(entry.date),
+      label: yearLabel(entry.date),
       ppm2: Math.round(median(entry.values)),
       count: entry.values.length,
     }));
 
-  const recent = series.slice(-8);
-  const regression = linearRegression(recent.map((point, index) => ({ x: index, y: point.ppm2 })));
+  const regression = linearRegression(series.map((point, index) => ({ x: index, y: point.ppm2 })));
   const forecast = [];
 
-  if (regression && recent.length >= 2) {
+  if (regression && series.length >= 2) {
     const last = series[series.length - 1];
-    for (let step = 1; step <= 4; step += 1) {
-      const nextDate = new Date(last.date.getFullYear(), last.date.getMonth() + step * 3, 1);
-      const ppm2 = Math.round(regression.intercept + regression.slope * (recent.length - 1 + step));
+    for (let step = 1; step <= 3; step++) {
+      const nextDate = new Date(last.date.getFullYear() + step, 0, 1);
+      const ppm2 = Math.round(regression.intercept + regression.slope * (series.length - 1 + step));
       forecast.push({
         key: `${nextDate.toISOString()}_forecast`,
         date: nextDate,
-        label: quarterLabel(nextDate),
+        label: yearLabel(nextDate),
         ppm2: Math.max(0, ppm2),
         forecast: true,
       });

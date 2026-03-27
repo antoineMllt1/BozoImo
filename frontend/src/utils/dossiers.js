@@ -244,6 +244,7 @@ export function normalizeDossier(dossier = {}) {
     lastEstimate: dossier.lastEstimate || null,
     confirmed: dossier.confirmed || null,
     propertyDescription: dossier.propertyDescription || '',
+    syntheseNotes: dossier.syntheseNotes || '',
     photos,
     coverPhoto,
     reportBrandLogo,

@@ -34,10 +34,12 @@ export default function AnalystWorkbench({
   analystBasePm2,
   analystAdjustments,
   manualEstimate,
+  syntheseNotes,
   onBaseChange,
   onAdjustmentsChange,
   onApplyEstimate,
   onTargetChange,
+  onSyntheseNotesChange,
 }) {
   const [showEditor, setShowEditor] = useState(false);
   const basePm2 = analystBasePm2 ?? metrics?.avgWeighted ?? metrics?.avg ?? null;
@@ -201,6 +203,35 @@ export default function AnalystWorkbench({
             Utiliser comme estimation
           </button>
         </div>
+      </section>
+
+      <section className="awb-card">
+        <div className="awb-card-head">
+          <div>
+            <h3>Notes de synthèse</h3>
+            <p>Décrivez l'état du bien, travaux, points forts/faibles. L'IA enrichira ce texte dans le PDF et l'onglet Synthèse.</p>
+          </div>
+        </div>
+        <textarea
+          style={{
+            width: '100%',
+            minHeight: '110px',
+            padding: '10px',
+            border: '1px solid #e5e7eb',
+            borderRadius: '6px',
+            fontSize: '13px',
+            lineHeight: '1.55',
+            resize: 'vertical',
+            fontFamily: 'inherit',
+            boxSizing: 'border-box',
+          }}
+          placeholder="Ex: Appartement refait à neuf en 2023, cuisine équipée, double vitrage. Quelques travaux de peinture (~1 500 €). Quartier calme, proximité école. DPE C favorable..."
+          value={syntheseNotes || ''}
+          onChange={(e) => onSyntheseNotesChange && onSyntheseNotesChange(e.target.value)}
+        />
+        <small style={{ color: '#6b7280', fontSize: '11px', marginTop: '4px', display: 'block' }}>
+          Résultat enrichi visible dans l'onglet Synthèse avant export PDF.
+        </small>
       </section>
     </div>
   );

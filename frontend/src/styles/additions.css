@@ -2889,9 +2889,10 @@
   fill: #0f172a;
 }
 
-.trend-quarter-label {
+.trend-quarter-label,
+.trend-year-label {
   fill: #94a3b8;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 

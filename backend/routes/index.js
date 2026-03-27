@@ -2,12 +2,16 @@ const express = require('express');
 const router = express.Router();
 
 // Import des routes
+const claudeRoutes = require('./claude.routes');
+const pdfRoutes = require('./pdf.routes');
 const enrichRoutes = require('./enrich.routes');
 const immobilierRoutes = require('./immobilier.routes');
 const selogerRoutes = require('./seloger.routes');
 const villesAVivreRoutes = require('./villesavivre.routes');
 
 // Configuration des routes
+router.use('/claude', claudeRoutes);
+router.use('/pdf', pdfRoutes);
 router.use('/enrich', enrichRoutes);
 router.use('/immobilier', immobilierRoutes);
 router.use('/seloger', selogerRoutes);

@@ -612,8 +612,9 @@ function computeEstimateCore(comps, target, correctionFactor = 1, areaContext = 
   const adjustments = buildAdjustments(target, areaContext);
   const afterSurfPm2 = basePm2 * surfAdj;
   const afterCharPm2 = afterSurfPm2 * adjustments.charAdj;
+  // contextAdj (quartier) kept for display/info only — not applied to the price
   const afterContextPm2 = afterCharPm2 * adjustments.contextAdj;
-  const correctedPm2 = afterContextPm2 * correctionFactor;
+  const correctedPm2 = afterCharPm2 * correctionFactor;
 
   const { std } = weightedStats(comps.map(comp => ({ value: comp.pm2, weight: comp.weight })));
   const halfWidth =

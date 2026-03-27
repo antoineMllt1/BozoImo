@@ -95,6 +95,7 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
   const [neighborhoodReloading, setNeighborhoodReloading] = useState(false);
   const [neighborhoodError, setNeighborhoodError] = useState('');
   const [disabledFactors, setDisabledFactors] = useState(dossier.disabledFactors || {});
+  const [syntheseNotes, setSyntheseNotes] = useState(dossier.syntheseNotes || '');
   const [iqrApplied, setIqrApplied] = useState(
     dossier.analystFilters?.ppm2Min != null || dossier.analystFilters?.ppm2Max != null
   );
@@ -115,6 +116,7 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
     setDataTab('retained');
     setHoveredRefId(null);
     setNeighborhoodError('');
+    setSyntheseNotes(dossier.syntheseNotes || '');
     setIqrApplied(dossier.analystFilters?.ppm2Min != null || dossier.analystFilters?.ppm2Max != null);
   }, [dossier]);
 
@@ -290,6 +292,11 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
     persistDossier({ disabledFactors: nextDisabled }, guessWorkStatus(dossier.status));
   }, [dossier.status, persistDossier]);
 
+  const handleSyntheseNotesChange = useCallback((value) => {
+    setSyntheseNotes(value);
+    persistDossier({ syntheseNotes: value }, guessWorkStatus(dossier.status));
+  }, [dossier.status, persistDossier]);
+
   // Auto-enrich when area context has no transport/schools data
   useEffect(() => {
     if (!dossier.lat || !dossier.lng) return;
@@ -453,13 +460,16 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
         metrics,
         filteredRefs: filtered,
         trend,
+        areaScores,
+        analystAdjustments,
+        syntheseNotes,
         logoDataUrl: dossier.reportBrandLogo?.dataUrl || null,
         chartNodes: { mapNode: tab === 'data' ? exportMapRef.current : null },
       });
     } finally {
       setExporting(false);
     }
-  }, [dossier, filtered, metrics, mlEstimate, tab]);
+  }, [dossier, filtered, metrics, mlEstimate, tab, areaScores, analystAdjustments, syntheseNotes]);
 
   const summaryCards = [
     { label: 'Références retenues', value: filtered.length },
@@ -576,10 +586,12 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
             analystBasePm2={analystBasePm2}
             analystAdjustments={analystAdjustments}
             manualEstimate={manualEstimate}
+            syntheseNotes={syntheseNotes}
             onBaseChange={handleAnalystBaseChange}
             onAdjustmentsChange={handleAnalystAdjustmentsChange}
             onApplyEstimate={handleManualEstimate}
             onTargetChange={handleTargetChange}
+            onSyntheseNotesChange={handleSyntheseNotesChange}
           />
         )}
 
@@ -606,6 +618,7 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
             areaScores={areaScores}
             trend={trend}
             filteredRefs={filtered}
+            syntheseNotes={syntheseNotes}
           />
         )}
 
