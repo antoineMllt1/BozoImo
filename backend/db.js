@@ -32,6 +32,16 @@ const pool = hasRealDb
 let _pgliteReady = null;
 function getPglite() {
   if (!_pgliteReady) {
+    // Le fallback embarqué est un confort de dev local uniquement — sur
+    // Railway (filesystem éphémère, souvent en lecture seule hors volume) il
+    // échouerait de façon confuse. On préfère une erreur claire qui pointe
+    // vers la vraie cause : DATABASE_URL manquante.
+    if (process.env.RAILWAY_ENVIRONMENT) {
+      throw new Error(
+        'DATABASE_URL manquante sur Railway — attache un plugin Postgres au service ' +
+        '(New → Database → PostgreSQL) et vérifie que la variable est bien injectée dans ce service.'
+      );
+    }
     const { PGlite } = require('@electric-sql/pglite');
     const dataDir = path.join(__dirname, '.cache', 'pglite-dev');
     _pgliteReady = PGlite.create ? PGlite.create({ dataDir }) : Promise.resolve(new PGlite(dataDir));
