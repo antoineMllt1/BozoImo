@@ -1,127 +1,22 @@
-const axios = require('axios');
-const fs = require('fs');
 const { createCirclePolyline } = require('../utils/polyline');
+const { createBrowserSession } = require('../utils/browserSession');
 
 // ── Puppeteer session (cached Chrome browser for DataDome bypass) ──────────────
-let _browser = null;
-let _page    = null;
-let _sessionReady = false;
-
-const CHROME_PATHS = [
-  // Env var override (Railway: set CHROME_EXECUTABLE=/usr/bin/chromium)
-  process.env.CHROME_EXECUTABLE,
-  // Linux — nixpkgs / Railway (nix profile)
-  '/root/.nix-profile/bin/chromium',
-  '/nix/var/nix/profiles/default/bin/chromium',
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-  '/usr/bin/google-chrome-stable',
-  '/usr/bin/google-chrome',
-  '/snap/bin/chromium',
-  // Windows — local dev
-  process.env.LOCALAPPDATA + '\\Google\\Chrome\\Application\\chrome.exe',
-  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-  'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-  process.env.LOCALAPPDATA + '\\Microsoft\\Edge\\Application\\msedge.exe',
-  'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-  'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-].filter(Boolean);
-
-function findBrowser() {
-  for (const p of CHROME_PATHS) {
-    try { if (fs.existsSync(p)) return p; } catch (_) {}
-  }
-  // Fallback: try `which chromium` or `which chromium-browser`
-  try {
-    const { execSync } = require('child_process');
-    for (const bin of ['chromium', 'chromium-browser', 'google-chrome']) {
-      try {
-        const p = execSync(`which ${bin}`, { encoding: 'utf8' }).trim();
-        if (p && fs.existsSync(p)) return p;
-      } catch (_) {}
-    }
-  } catch (_) {}
-  return null;
-}
-
-async function getPage() {
-  if (_page && _sessionReady) return _page;
-
-  const executablePath = findBrowser();
-  if (!executablePath) throw new Error('Chrome/Edge introuvable — installez Chrome pour utiliser SeLoger');
-
-  const puppeteer = require('puppeteer-core');
-  _browser = await puppeteer.launch({
-    executablePath,
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled'],
-    ignoreDefaultArgs: ['--enable-automation'],
-  });
-
-  _page = await _browser.newPage();
-  await _page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
-  await _page.setExtraHTTPHeaders({ 'accept-language': 'fr-FR,fr;q=0.9' });
-
-  // Visit SeLoger to obtain the DataDome cookie
-  await _page.goto('https://www.seloger.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });
-  _sessionReady = true;
-
-  _browser.on('disconnected', () => { _browser = null; _page = null; _sessionReady = false; });
-  return _page;
-}
+const seLogerSession = createBrowserSession({
+  warmupUrl: 'https://www.seloger.com/',
+  name: 'SeLoger',
+});
 
 async function makeRequest(config) {
-  const page = await getPage();
-  const method = (config.method || 'GET').toUpperCase();
-  const body   = config.data ? (typeof config.data === 'string' ? config.data : JSON.stringify(config.data)) : undefined;
-  const headers = {
-    accept: 'application/json, text/plain, */*',
-    origin: 'https://www.seloger.com',
-    referer: 'https://www.seloger.com/',
-  };
-
-  for (const [key, value] of Object.entries(config.headers || {})) {
-    if (value == null) continue;
-    const normalized = key.toLowerCase();
-    if (
-      normalized === 'accept' ||
-      normalized === 'content-type' ||
-      normalized === 'origin' ||
-      normalized === 'referer' ||
-      normalized === 'x-language' ||
-      normalized.startsWith('x-')
-    ) {
-      headers[key] = value;
-    }
-  }
-
-  if (body) {
-    const hasContentType = Object.keys(headers).some(key => key.toLowerCase() === 'content-type');
-    if (!hasContentType) headers['content-type'] = 'application/json';
-  } else {
-    for (const key of Object.keys(headers)) {
-      if (key.toLowerCase() === 'content-type') delete headers[key];
-    }
-  }
-
-  const result = await page.evaluate(async ({ url, method, body, headers }) => {
-    const res = await fetch(url, {
-      method,
-      headers,
-      body,
-      credentials: 'include',
-    });
-    const text = await res.text();
-    return { status: res.status, text };
-  }, { url: config.url, method, body, headers });
-
-  if (result.status >= 400) {
-    const err = new Error(`SeLoger responded with ${result.status}`);
-    err.response = { status: result.status, data: result.text };
-    throw err;
-  }
-
-  return { data: JSON.parse(result.text) };
+  return seLogerSession.request({
+    ...config,
+    headers: {
+      accept: 'application/json, text/plain, */*',
+      origin: 'https://www.seloger.com',
+      referer: 'https://www.seloger.com/',
+      ...config.headers,
+    },
+  });
 }
 
 const CLASSIFIED_DETAILS_BATCH_SIZE = 50;

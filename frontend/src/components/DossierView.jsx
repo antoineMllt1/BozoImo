@@ -3,7 +3,6 @@ import { DEFAULT_ANALYST_FILTERS } from '../utils/dossiers';
 import { stripDvfSnapshot, stripSelogerSnapshot } from '../utils/storage';
 import { normalizeRefs, applyFilters, computeMetrics, suggestRange } from '../utils/edm';
 import { addConfirmation, computeAreaScores, computeEstimateFromRefs } from '../utils/model';
-import { saveModel } from '../utils/storage';
 import { exportDossierPdf } from '../utils/report';
 import { fmtDate } from '../utils/formatters';
 import { estateTypesForTargetType, itemTypesForTargetType, matchesTargetPropertyType } from '../utils/propertyType';
@@ -340,7 +339,6 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
       mape: result.mape,
     };
 
-    saveModel(updatedModel);
     onConfirmPrice(updatedModel);
     persistDossier({
       confirmed: {

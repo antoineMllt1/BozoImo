@@ -18,6 +18,7 @@ export default function SelogerTable({
   hoveredRefId = null,
   onHoverRef = null,
   targetType = null,
+  keptIds = null, // Set des `sl_${i}` retenus par les filtres — null = pas de filtrage (tout afficher)
 }) {
   if (!snapshot) {
     return (
@@ -44,7 +45,8 @@ export default function SelogerTable({
   }
 
   const rawList = (snapshot.data?.classifieds || []).map((item, index) => ({ ...item, __refId: `sl_${index}` }));
-  const list = targetType ? rawList.filter(item => matchesTargetPropertyType(item, targetType)) : rawList;
+  let list = targetType ? rawList.filter(item => matchesTargetPropertyType(item, targetType)) : rawList;
+  if (keptIds) list = list.filter(item => keptIds.has(item.__refId));
 
   const hasFloor = list.some(item => item.floor != null);
   const hasOrient = list.some(item => item.orientation);
@@ -55,14 +57,17 @@ export default function SelogerTable({
   const hasParkCol = list.some(item => item.hasParking);
   const hasCaveCol = list.some(item => item.hasCellar);
 
-  const exportData = (fmt) => {
+  const isFiltered = list.length !== rawList.length;
+
+  const exportData = (fmt, useAll = false) => {
+    const source = useAll ? rawList : list;
     const sep = fmt === 'csv' ? ',' : '\t';
     const q = value => fmt === 'csv' && typeof value === 'string' && value.includes(',') ? `"${value}"` : value;
     const headers = [
       '#', 'Type', 'Prix', '€/m²', 'Pièces', 'Chambres', 'Surface', 'Étage', 'Orientation',
       'Ascenseur', 'Balcon', 'Terrasse', 'Parking', 'Cave', 'Ville', 'CP', 'Quartier', 'Agence', 'URL',
     ];
-    const rows = list.map((item, index) => [
+    const rows = source.map((item, index) => [
       index + 1,
       q(item.title),
       item.price ?? '',
@@ -87,7 +92,7 @@ export default function SelogerTable({
     dl(
       [headers.join(sep), ...rows].join('\n'),
       fmt === 'csv' ? 'text/csv' : 'application/vnd.ms-excel',
-      `seloger_${isoToday()}.${fmt === 'csv' ? 'csv' : 'xls'}`
+      `seloger${useAll ? '_tout' : ''}_${isoToday()}.${fmt === 'csv' ? 'csv' : 'xls'}`
     );
   };
 
@@ -118,6 +123,26 @@ export default function SelogerTable({
             </svg>
             Excel
           </button>
+          {isFiltered && (
+            <>
+              <button className="exp-btn exp-btn-ghost" title={`Exporter les ${rawList.length} offres sans tenir compte des filtres`} onClick={() => exportData('csv', true)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Tout ({rawList.length}) CSV
+              </button>
+              <button className="exp-btn exp-btn-ghost" title={`Exporter les ${rawList.length} offres sans tenir compte des filtres`} onClick={() => exportData('xls', true)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Tout ({rawList.length}) Excel
+              </button>
+            </>
+          )}
         </div>
       </div>
 

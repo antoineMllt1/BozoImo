@@ -8,6 +8,8 @@ const enrichRoutes = require('./enrich.routes');
 const immobilierRoutes = require('./immobilier.routes');
 const selogerRoutes = require('./seloger.routes');
 const villesAVivreRoutes = require('./villesavivre.routes');
+const authRoutes = require('./auth.routes');
+const dossiersRoutes = require('./dossiers.routes');
 
 // Configuration des routes
 router.use('/claude', claudeRoutes);
@@ -16,6 +18,8 @@ router.use('/enrich', enrichRoutes);
 router.use('/immobilier', immobilierRoutes);
 router.use('/seloger', selogerRoutes);
 router.use('/villesavivre', villesAVivreRoutes);
+router.use('/auth', authRoutes);
+router.use('/dossiers', dossiersRoutes);
 
 // Route racine de l'API
 router.get('/', (req, res) => {
@@ -38,6 +42,17 @@ router.get('/', (req, res) => {
       seloger: {
         search: 'POST /api/seloger/search',
         autocomplete: 'POST /api/seloger/autocomplete'
+      },
+      auth: {
+        signup: 'POST /api/auth/signup',
+        login: 'POST /api/auth/login',
+        me: 'GET /api/auth/me',
+        model: 'PUT /api/auth/model'
+      },
+      dossiers: {
+        list: 'GET /api/dossiers',
+        upsert: 'PUT /api/dossiers/:id',
+        remove: 'DELETE /api/dossiers/:id'
       }
     }
   });

@@ -238,6 +238,14 @@ export default function DataWorkbench({
   const currentRadiusLabel = RADIUS_OPTIONS.find(option => option.value === dossier.radiusMeters)?.label || `${dossier.radiusMeters}m`;
   const selectedRadiusLabel = RADIUS_OPTIONS.find(option => option.value === pendingRadius)?.label || `${pendingRadius}m`;
 
+  // IDs (`dvf_${i}` / `sl_${i}`) retenus par les filtres actifs — propagés aux
+  // onglets DVF/SeLoger pour qu'ils affichent le même sous-ensemble que
+  // l'onglet "Retenues" au lieu du snapshot brut intégral.
+  const keptDvfIds = new Set(filteredRefs.filter(ref => ref.source === 'dvf').map(ref => ref.id));
+  const keptSelogerIds = new Set(filteredRefs.filter(ref => ref.source === 'seloger').map(ref => ref.id));
+  const nDvfFiltered = keptDvfIds.size;
+  const nSelogerFiltered = keptSelogerIds.size;
+
   return (
     <div className="data-workbench">
       <div className="data-workbench-top">
@@ -402,11 +410,11 @@ export default function DataWorkbench({
         </button>
         <button className={`dw-tab ${dataTab === 'dvf' ? 'active' : ''}`} onClick={() => onDataTabChange('dvf')}>
           DVF
-          <span>{dossier.dvfSnapshot?.data?.features?.length || 0}</span>
+          <span>{nDvfFiltered}{nDvfFiltered !== (dossier.dvfSnapshot?.data?.features?.length || 0) ? ` / ${dossier.dvfSnapshot?.data?.features?.length || 0}` : ''}</span>
         </button>
         <button className={`dw-tab ${dataTab === 'seloger' ? 'active' : ''}`} onClick={() => onDataTabChange('seloger')}>
           SeLoger
-          <span>{dossier.selogerSnapshot?.data?.classifieds?.length || 0}</span>
+          <span>{nSelogerFiltered}{nSelogerFiltered !== (dossier.selogerSnapshot?.data?.classifieds?.length || 0) ? ` / ${dossier.selogerSnapshot?.data?.classifieds?.length || 0}` : ''}</span>
         </button>
       </div>
 
@@ -427,6 +435,7 @@ export default function DataWorkbench({
             onToggle={() => {}}
             hoveredRefId={hoveredRefId}
             onHoverRef={onHoverRef}
+            keptIds={keptDvfIds}
           />
         )}
         {dataTab === 'seloger' && (
@@ -437,6 +446,7 @@ export default function DataWorkbench({
             hoveredRefId={hoveredRefId}
             onHoverRef={onHoverRef}
             targetType={targetType}
+            keptIds={keptSelogerIds}
           />
         )}
       </div>

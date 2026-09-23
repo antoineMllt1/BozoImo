@@ -1,14 +1,15 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import './App.css';
 import './styles/additions.css';
-import { loadDossiers, saveDossiers, loadModel } from './utils/storage';
-import { saveModel } from './utils/storage';
 import { computeEstimate, computeEstimateFromRefs, modelStats } from './utils/model';
 import { normalizeRefs, applyFilters } from './utils/edm';
 import { normalizeDossier } from './utils/dossiers';
 import { fmtPm2 } from './utils/formatters';
+import { getToken, setToken, fetchMe, fetchDossiers, upsertDossierRemote, deleteDossierRemote, saveModelRemote } from './utils/api';
+import { DEFAULT_MODEL } from './utils/storage';
 import HomeView from './components/HomeView';
 import CommandPalette from './components/CommandPalette';
+import AuthView from './components/AuthView';
 
 const NewDossierForm = lazy(() => import('./components/NewDossierForm'));
 const DossierView = lazy(() => import('./components/DossierView'));
@@ -68,21 +69,69 @@ function hydrateEstimate(dossier, correctionFactor) {
   return normalizeDossier({ ...normalized, lastEstimate });
 }
 
+function persistDossierRemote(dossier) {
+  upsertDossierRemote(dossier).catch(err => console.warn('Sauvegarde du dossier échouée :', err.message));
+}
+
 export default function App() {
   const uiPrefs = useMemo(() => readUiPrefs(), []);
   const [view, setView] = useState('home');
-  const [dossiers, setDossiers] = useState(() => loadDossiers());
+  const [dossiers, setDossiers] = useState([]);
   const [activeDossierId, setActiveDossierId] = useState(null);
-  const [model, setModel] = useState(loadModel);
+  const [model, setModel] = useState(DEFAULT_MODEL);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(uiPrefs.sidebarCollapsed);
   const [commandOpen, setCommandOpen] = useState(false);
 
-  useEffect(() => {
-    const result = saveDossiers(dossiers);
-    if (result?.error === 'quota') {
-      console.warn('localStorage quota reached. Consider removing large photos or old dossiers.');
+  // ── Compte & session ──────────────────────────────────────────────────
+  const [authStatus, setAuthStatus] = useState('checking'); // checking | authenticated | unauthenticated
+  const [user, setUser] = useState(null);
+
+  const loadAccountData = useCallback(async (nextModel) => {
+    if (nextModel) setModel({ ...DEFAULT_MODEL, ...nextModel });
+    try {
+      const remoteDossiers = await fetchDossiers();
+      setDossiers(remoteDossiers.map(normalizeDossier));
+    } catch (err) {
+      console.warn('Chargement des dossiers échoué :', err.message);
+      setDossiers([]);
     }
-  }, [dossiers]);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!getToken()) {
+      setAuthStatus('unauthenticated');
+      return;
+    }
+    fetchMe()
+      .then(async ({ user: me, model: remoteModel }) => {
+        if (cancelled) return;
+        setUser(me);
+        await loadAccountData(remoteModel);
+        if (!cancelled) setAuthStatus('authenticated');
+      })
+      .catch(() => {
+        if (!cancelled) setAuthStatus('unauthenticated');
+      });
+    return () => { cancelled = true; };
+  }, [loadAccountData]);
+
+  const handleAuthenticated = useCallback(async ({ token, user: newUser, model: newModel }) => {
+    setToken(token);
+    setUser(newUser);
+    await loadAccountData(newModel);
+    setAuthStatus('authenticated');
+  }, [loadAccountData]);
+
+  const handleLogout = useCallback(() => {
+    setToken(null);
+    setUser(null);
+    setDossiers([]);
+    setModel(DEFAULT_MODEL);
+    setActiveDossierId(null);
+    setView('home');
+    setAuthStatus('unauthenticated');
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(UI_PREFS_KEY, JSON.stringify({ sidebarCollapsed }));
@@ -122,6 +171,7 @@ export default function App() {
     setDossiers(prev => [hydrated, ...prev]);
     setActiveDossierId(hydrated.id);
     setView('dossier');
+    persistDossierRemote(hydrated);
   }, [model.correctionFactor]);
 
   const handleUpdate = useCallback((updated) => {
@@ -133,11 +183,12 @@ export default function App() {
       model.correctionFactor
     );
     setDossiers(prev => prev.map(dossier => (dossier.id === hydrated.id ? hydrated : dossier)));
+    persistDossierRemote(hydrated);
   }, [model.correctionFactor]);
 
   const handleConfirmPrice = useCallback((updatedModel) => {
-    saveModel(updatedModel);
     setModel(updatedModel);
+    saveModelRemote(updatedModel).catch(err => console.warn('Sauvegarde du modèle échouée :', err.message));
   }, []);
 
   const handleOpen = useCallback((id) => {
@@ -153,6 +204,7 @@ export default function App() {
       setActiveDossierId(null);
       setView('home');
     }
+    deleteDossierRemote(id).catch(err => console.warn('Suppression du dossier échouée :', err.message));
   }, [activeDossierId]);
 
   const handleDuplicate = useCallback((id) => {
@@ -172,18 +224,21 @@ export default function App() {
     setDossiers(prev => [duplicated, ...prev]);
     setActiveDossierId(duplicated.id);
     setView('dossier');
+    persistDossierRemote(duplicated);
   }, [dossiers, model.correctionFactor]);
 
   const handleArchive = useCallback((id) => {
     setDossiers(prev => prev.map(dossier => {
       if (dossier.id !== id) return dossier;
       const archived = !dossier.archivedAt;
-      return normalizeDossier({
+      const next = normalizeDossier({
         ...dossier,
         archivedAt: archived ? new Date().toISOString() : null,
         status: archived ? 'archived' : deriveActiveStatus(dossier),
         updatedAt: new Date().toISOString(),
       });
+      persistDossierRemote(next);
+      return next;
     }));
   }, []);
 
@@ -239,6 +294,19 @@ export default function App() {
       )}
     </div>
   );
+
+  if (authStatus === 'checking') {
+    return (
+      <div className="auth-loading">
+        <div className="spinner-ring" />
+        <p>Chargement...</p>
+      </div>
+    );
+  }
+
+  if (authStatus === 'unauthenticated') {
+    return <AuthView onAuthenticated={handleAuthenticated} />;
+  }
 
   return (
     <div className={`app ${sidebarCollapsed ? 'app-sidebar-collapsed' : ''}`}>
@@ -315,6 +383,11 @@ export default function App() {
           ) : (
             <p className="sb-cold">Non calibre. Une confirmation suffit pour l&apos;amorcer.</p>
           )}
+        </div>
+
+        <div className="sb-account">
+          <span className="sb-account-name" title={user?.email}>{user?.name || user?.email}</span>
+          <button className="sb-account-logout" onClick={handleLogout} title="Se déconnecter">↪</button>
         </div>
 
         <div className="sb-footer">

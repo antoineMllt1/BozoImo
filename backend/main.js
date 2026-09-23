@@ -4,6 +4,7 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const apiRoutes = require('./routes');
+const { migrate } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -65,19 +66,27 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Démarrer le serveur
-app.listen(PORT, () => {
-  console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
-  console.log(`📍 Routes disponibles:`);
-  console.log(`   GET  http://localhost:${PORT}/api`);
-  console.log(`\n   📊 Immobilier (MeilleursAgents):`);
-  console.log(`   GET  http://localhost:${PORT}/api/immobilier/health`);
-  console.log(`   POST http://localhost:${PORT}/api/immobilier/search`);
-  console.log(`   POST http://localhost:${PORT}/api/immobilier/geocode`);
-  console.log(`\n   🏠 SeLoger:`);
-  console.log(`   POST http://localhost:${PORT}/api/seloger/search`);
-  console.log(`   POST http://localhost:${PORT}/api/seloger/autocomplete`);
-  console.log(`\n   🏙️ Villes a vivre:`);
-  console.log(`   POST http://localhost:${PORT}/api/villesavivre/search`);
-  console.log(`   POST http://localhost:${PORT}/api/villesavivre/profile`);
-});
+// Démarrer le serveur (après avoir appliqué les migrations DB si configurée)
+migrate()
+  .catch(err => console.error('⚠️  Échec des migrations base de données:', err.message))
+  .finally(() => {
+    app.listen(PORT, () => {
+      console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+      console.log(`📍 Routes disponibles:`);
+      console.log(`   GET  http://localhost:${PORT}/api`);
+      console.log(`\n   📊 Immobilier (MeilleursAgents):`);
+      console.log(`   GET  http://localhost:${PORT}/api/immobilier/health`);
+      console.log(`   POST http://localhost:${PORT}/api/immobilier/search`);
+      console.log(`   POST http://localhost:${PORT}/api/immobilier/geocode`);
+      console.log(`\n   🏠 SeLoger:`);
+      console.log(`   POST http://localhost:${PORT}/api/seloger/search`);
+      console.log(`   POST http://localhost:${PORT}/api/seloger/autocomplete`);
+      console.log(`\n   🏙️ Villes a vivre:`);
+      console.log(`   POST http://localhost:${PORT}/api/villesavivre/search`);
+      console.log(`   POST http://localhost:${PORT}/api/villesavivre/profile`);
+      console.log(`\n   👤 Comptes:`);
+      console.log(`   POST http://localhost:${PORT}/api/auth/signup`);
+      console.log(`   POST http://localhost:${PORT}/api/auth/login`);
+      console.log(`   GET  http://localhost:${PORT}/api/dossiers`);
+    });
+  });

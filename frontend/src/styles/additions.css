@@ -4324,3 +4324,42 @@
 .algo-row-off .algo-toggle-label span { text-decoration: line-through; }
 .est-val-muted { color: var(--text-3); }
 .algo-card-wide { grid-column: 1 / -1; }
+
+/* ============================================================
+   Auth (login / signup)
+   ============================================================ */
+.auth-view {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 100vh; background: var(--bg); padding: 24px;
+}
+.auth-card {
+  width: 100%; max-width: 380px;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px;
+  padding: 32px; box-shadow: 0 4px 24px rgba(0,0,0,.06);
+  display: flex; flex-direction: column; align-items: stretch;
+}
+.auth-logo { width: 44px; height: 44px; object-fit: contain; margin: 0 auto 16px; }
+.auth-view .form-title { text-align: center; }
+.auth-view .form-sub { text-align: center; margin-bottom: 20px; }
+.auth-switch {
+  margin-top: 16px; background: none; border: none; cursor: pointer;
+  color: var(--accent-text); font-size: .8125rem; font-weight: 600; text-align: center;
+}
+.auth-switch:hover { text-decoration: underline; }
+.auth-loading {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 100vh; gap: 12px; color: var(--text-2);
+}
+.sb-account {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px 12px; margin: 8px 0; border-top: 1px solid var(--border);
+}
+.sb-account-name {
+  font-size: .75rem; font-weight: 600; color: var(--text-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sb-account-logout {
+  background: none; border: none; cursor: pointer; color: var(--text-3);
+  font-size: 1rem; line-height: 1; padding: 4px;
+}
+.sb-account-logout:hover { color: var(--accent-text); }

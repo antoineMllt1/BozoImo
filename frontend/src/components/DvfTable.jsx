@@ -13,6 +13,7 @@ export default function DvfTable({
   onToggle,
   hoveredRefId = null,
   onHoverRef = null,
+  keptIds = null, // Set des `dvf_${i}` retenus par les filtres — null = pas de filtrage (tout afficher)
 }) {
   if (!snapshot) return (
     <div className="snap-placeholder"><p>Données DVF non disponibles.</p></div>
@@ -26,20 +27,33 @@ export default function DvfTable({
     </div>
   );
 
-  const features = snapshot.data?.features || [];
+  const allFeatures = snapshot.data?.features || [];
+  // On garde l'index d'origine (utilisé par selectedComps/onToggle et par edm.js
+  // pour générer les ids `dvf_${i}`) même après filtrage.
+  const features = keptIds
+    ? allFeatures.filter((_, i) => keptIds.has(`dvf_${i}`))
+    : allFeatures;
+  const originalIndex = keptIds
+    ? allFeatures.reduce((acc, _, i) => (keptIds.has(`dvf_${i}`) ? [...acc, i] : acc), [])
+    : allFeatures.map((_, i) => i);
   const nSelected = selectedComps.length;
 
-  const exportData = (fmt) => {
+  const isFiltered = keptIds != null && features.length !== allFeatures.length;
+
+  const exportData = (fmt, useAll = false) => {
+    const source = useAll ? allFeatures : features;
+    const indexOf = useAll ? allFeatures.map((_, i) => i) : originalIndex;
     const sep = fmt === 'csv' ? ',' : '\t';
     const q   = v => fmt === 'csv' && typeof v === 'string' && v.includes(',') ? `"${v}"` : v;
     const H   = ['Sélectionné','#','Adresse','Pièces','Surface m²','Prix','Prix actualisé','€/m²','Date'];
-    const rows = features.map((f, i) => {
+    const rows = source.map((f, idx) => {
+      const i = indexOf[idx];
       const p = f.properties;
       return [selectedComps.includes(i)?'✓':'',i+1,q(p.address_name),p.room_count,p.area,q(p.price),p.updated_price,Math.round(p.updated_price/p.area),p.sale_at].join(sep);
     });
     dl([H.join(sep), ...rows].join('\n'),
       fmt==='csv'?'text/csv':'application/vnd.ms-excel',
-      `dvf_${isoToday()}.${fmt==='csv'?'csv':'xls'}`);
+      `dvf${useAll ? '_tout' : ''}_${isoToday()}.${fmt==='csv'?'csv':'xls'}`);
   };
 
   return (
@@ -57,7 +71,7 @@ export default function DvfTable({
         </div>
         <div className="snap-actions">
           {nSelected > 0 && (
-            <button className="exp-btn exp-btn-ghost" onClick={() => features.forEach((_, i) => selectedComps.includes(i) && onToggle(i))}>
+            <button className="exp-btn exp-btn-ghost" onClick={() => originalIndex.forEach(i => selectedComps.includes(i) && onToggle(i))}>
               Tout décocher
             </button>
           )}
@@ -71,6 +85,20 @@ export default function DvfTable({
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
             </svg>Excel
           </button>
+          {isFiltered && (
+            <>
+              <button className="exp-btn exp-btn-ghost" title={`Exporter les ${allFeatures.length} transactions sans tenir compte des filtres`} onClick={() => exportData('csv', true)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>Tout ({allFeatures.length}) CSV
+              </button>
+              <button className="exp-btn exp-btn-ghost" title={`Exporter les ${allFeatures.length} transactions sans tenir compte des filtres`} onClick={() => exportData('xls', true)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>Tout ({allFeatures.length}) Excel
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -87,12 +115,12 @@ export default function DvfTable({
                   <input
                     type="checkbox"
                     title="Tout sélectionner / déselectionner"
-                    checked={nSelected === features.length}
+                    checked={features.length > 0 && originalIndex.every(i => selectedComps.includes(i))}
                     onChange={() => {
-                      if (nSelected === features.length) {
-                        features.forEach((_, i) => onToggle(i));
+                      if (originalIndex.every(i => selectedComps.includes(i))) {
+                        originalIndex.forEach(i => onToggle(i));
                       } else {
-                        features.forEach((_, i) => { if (!selectedComps.includes(i)) onToggle(i); });
+                        originalIndex.forEach(i => { if (!selectedComps.includes(i)) onToggle(i); });
                       }
                     }}
                   />
@@ -102,7 +130,8 @@ export default function DvfTable({
               </tr>
             </thead>
             <tbody>
-              {features.map((feat, i) => {
+              {features.map((feat, idx) => {
+                const i        = originalIndex[idx];
                 const p        = feat.properties;
                 const isOn     = selectedComps.includes(i);
                 const refId    = `dvf_${i}`;
