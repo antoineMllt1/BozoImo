@@ -9,6 +9,7 @@
     "refresh-dvf-cookie": "node scripts/set-dvf-cookie.js"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "axios": "^1.13.2",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",

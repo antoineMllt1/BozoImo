@@ -577,7 +577,7 @@ select option:checked {
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 20px 24px;
 }
-.fp-group { display: flex; flex-direction: column; gap: 8px; }
+.fp-group { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .fp-group-full { grid-column: 1 / -1; }
 
 .fp-lbl {
@@ -589,7 +589,7 @@ select option:checked {
 }
 
 .fp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.fp-range { display: flex; align-items: center; gap: 8px; }
+.fp-range { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .fp-dash  { color: var(--text-3); font-size: 13px; user-select: none; flex-shrink: 0; }
 
 .fp-input {

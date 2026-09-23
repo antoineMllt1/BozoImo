@@ -46,8 +46,7 @@ router.get('/', (req, res) => {
       auth: {
         signup: 'POST /api/auth/signup',
         login: 'POST /api/auth/login',
-        me: 'GET /api/auth/me',
-        model: 'PUT /api/auth/model'
+        me: 'GET /api/auth/me'
       },
       dossiers: {
         list: 'GET /api/dossiers',

@@ -1,52 +1,5 @@
-import { normalizeDossier } from './dossiers';
 import { analyzeListingText } from './nlp';
 import { inferPropertyType } from './propertyType';
-
-const DOSSIERS_KEY = 'estimia_dossiers_v1';
-const MODEL_KEY = 'estimia_model_v1';
-
-export function loadDossiers() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(DOSSIERS_KEY) || '[]');
-    return Array.isArray(parsed) ? parsed.map(normalizeDossier) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function saveDossiers(dossiers) {
-  try {
-    localStorage.setItem(DOSSIERS_KEY, JSON.stringify(dossiers.slice(0, 50)));
-    return { ok: true };
-  } catch (e) {
-    if (e.name === 'QuotaExceededError') return { ok: false, error: 'quota' };
-    return { ok: false, error: e.message };
-  }
-}
-
-export const DEFAULT_MODEL = {
-  samples: [],
-  correctionFactor: 1,
-  mae: null,
-  mape: null,
-};
-
-export function loadModel() {
-  try {
-    const s = localStorage.getItem(MODEL_KEY);
-    return s ? { ...DEFAULT_MODEL, ...JSON.parse(s) } : { ...DEFAULT_MODEL };
-  } catch {
-    return { ...DEFAULT_MODEL };
-  }
-}
-
-export function saveModel(model) {
-  try {
-    localStorage.setItem(MODEL_KEY, JSON.stringify(model));
-  } catch {
-    // Ignore non-critical persistence errors.
-  }
-}
 
 function _toStr(value) {
   if (typeof value === 'string') return value.toLowerCase();

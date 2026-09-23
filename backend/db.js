@@ -1,18 +1,25 @@
-const { Pool } = require('pg');
+const path = require('path');
 
 /**
- * Connexion Postgres partagée (comptes agents + historique des dossiers).
- * DATABASE_URL est fourni automatiquement par Railway quand un plugin
- * Postgres est attaché au service. En local, mets la même valeur dans .env
- * (voir .env.example) pour pointer vers la même base pendant le dev.
+ * Connexion base de données (comptes agents + historique des dossiers).
+ *
+ * - En production (Railway) : DATABASE_URL est fournie automatiquement quand
+ *   un plugin Postgres est attaché au service → on utilise `pg`.
+ * - En local sans DATABASE_URL : on utilise une base Postgres embarquée
+ *   (@electric-sql/pglite, Postgres compilé en WASM — aucune install, aucun
+ *   Docker) persistée dans backend/.cache/pglite-dev/. Pratique pour tester
+ *   tout le flux (comptes, historique) sans rien déployer. Les données ne
+ *   vivent que sur cette machine — à ne jamais utiliser en prod.
  */
 
-if (!process.env.DATABASE_URL) {
-  console.warn('⚠️  DATABASE_URL absente — les comptes et l\'historique des dossiers ne fonctionneront pas.');
+const hasRealDb = Boolean(process.env.DATABASE_URL);
+
+if (!hasRealDb) {
+  console.warn('⚠️  DATABASE_URL absente — utilisation d\'une base Postgres locale embarquée (dev uniquement, voir backend/db.js)');
 }
 
-const pool = process.env.DATABASE_URL
-  ? new Pool({
+const pool = hasRealDb
+  ? new (require('pg').Pool)({
       connectionString: process.env.DATABASE_URL,
       // Railway (et la plupart des Postgres managés) exigent TLS mais avec un
       // certificat auto-signé côté serveur — on le désactive sans forcer une
@@ -22,9 +29,20 @@ const pool = process.env.DATABASE_URL
     })
   : null;
 
+let _pgliteReady = null;
+function getPglite() {
+  if (!_pgliteReady) {
+    const { PGlite } = require('@electric-sql/pglite');
+    const dataDir = path.join(__dirname, '.cache', 'pglite-dev');
+    _pgliteReady = PGlite.create ? PGlite.create({ dataDir }) : Promise.resolve(new PGlite(dataDir));
+  }
+  return _pgliteReady;
+}
+
 async function query(text, params) {
-  if (!pool) throw new Error('Base de données non configurée (DATABASE_URL manquante)');
-  return pool.query(text, params);
+  if (pool) return pool.query(text, params);
+  const db = await getPglite();
+  return db.query(text, params);
 }
 
 /**
@@ -32,8 +50,6 @@ async function query(text, params) {
  * démarrage du serveur — idempotent, donc sans danger à chaque redéploiement.
  */
 async function migrate() {
-  if (!pool) return;
-
   await query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
@@ -58,7 +74,7 @@ async function migrate() {
 
   await query(`CREATE INDEX IF NOT EXISTS idx_dossiers_user_id ON dossiers(user_id);`);
 
-  console.log('✅ Migrations base de données appliquées');
+  console.log(`✅ Migrations base de données appliquées${hasRealDb ? '' : ' (base locale embarquée — dev uniquement)'}`);
 }
 
-module.exports = { pool, query, migrate };
+module.exports = { pool, query, migrate, hasRealDb };

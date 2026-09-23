@@ -42,7 +42,7 @@ function buildHtml({ dossier, estimate, metrics, filteredRefs, areaScores, analy
   const target = dossier.target || {};
   const surf = target.surfaceM2 || 0;
   const pivotPm2 = dossier.manualEstimate || null;
-  const algoPm2 = estimate?.correctedPm2 || null;
+  const algoPm2 = estimate?.estimatedPm2 || null;
   const recoPm2 = pivotPm2 || algoPm2;
   const recoPrice = recoPm2 && surf ? recoPm2 * surf : null;
   const typeLabel = target.type === 'House' ? 'Maison' : 'Appartement';
@@ -553,8 +553,7 @@ tr:nth-child(even) td{background:#f8fafc}
         ${[
           ['Médiane des transactions comparables', estimate?.basePm2 ? fmt(estimate.basePm2)+' €/m²' : null],
           ['Après ajustement surface ('+surf+' m²)', estimate?.afterSurfPm2 ? fmt(estimate.afterSurfPm2)+' €/m²' : null],
-          ['Après caractéristiques du bien', estimate?.afterCharPm2 ? fmt(estimate.afterCharPm2)+' €/m²' : null],
-          ['Prix algorithmique final', algoPm2 ? fmt(algoPm2)+' €/m²' : null],
+          ['Repère du modèle statistique (pondérations du bien incluses)', algoPm2 ? fmt(algoPm2)+' €/m²' : null],
           ['Prix recommandé (analyste)', recoPm2 ? fmt(recoPm2)+' €/m²' : null],
         ].filter(([,v])=>v).map(([lbl,val],i,arr)=>{
           const last = i===arr.length-1;
@@ -597,7 +596,7 @@ router.post('/generate', async (req, res) => {
       const ctx = [
         `Bien : ${target.type==='House'?'Maison':'Appartement'} ${target.surfaceM2}m² ${target.rooms}P — ${dossier.address}`,
         `État : ${target.condition||'—'} · DPE ${target.dpe||'—'}`,
-        `Prix analyste : ${dossier.manualEstimate?fmt(dossier.manualEstimate)+' €/m²':'—'} · Algo : ${estimate?.correctedPm2?fmt(estimate.correctedPm2)+' €/m²':'—'}`,
+        `Prix analyste : ${dossier.manualEstimate?fmt(dossier.manualEstimate)+' €/m²':'—'} · Modèle statistique : ${estimate?.estimatedPm2?fmt(estimate.estimatedPm2)+' €/m²':'—'}`,
         `Marché : ${metrics?.n??0} refs · moy ${metrics?.avgWeighted?fmt(metrics.avgWeighted):'—'} €/m²`,
       ].join('\n');
       const r = await fetch('https://api.anthropic.com/v1/messages', {

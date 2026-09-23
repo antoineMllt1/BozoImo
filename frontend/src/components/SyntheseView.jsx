@@ -7,20 +7,38 @@ function renderStars(stars = 0) {
   return '★'.repeat(stars) + '☆'.repeat(Math.max(0, 5 - stars));
 }
 
-function DeltaBanner({ analystPm2, algoPm2 }) {
-  if (!Number.isFinite(analystPm2) || !Number.isFinite(algoPm2) || algoPm2 === 0) return null;
-  const delta = ((analystPm2 - algoPm2) / algoPm2) * 100;
-  const cls = Math.abs(delta) <= 5 ? 'syn-delta-ok' : Math.abs(delta) <= 12 ? 'syn-delta-warn' : 'syn-delta-danger';
+function ConfirmPriceForm({ surfaceM2, onConfirm }) {
+  const [price, setPrice] = useState('');
+  const hasSurface = surfaceM2 > 0;
+
+  const handleSubmit = () => {
+    const parsed = parseFloat(price.replace(/[\s €]/g, '').replace(',', '.'));
+    if (!parsed || parsed <= 0 || !hasSurface) return;
+    onConfirm(parsed);
+    setPrice('');
+  };
+
   return (
-    <div className={`syn-delta-banner ${cls}`}>
-      <span>Ecart analyste vs. algo</span>
-      <strong>{delta > 0 ? '+' : ''}{delta.toFixed(1)}%</strong>
-      <small>
-        {Math.abs(delta) <= 5 ? 'Convergence forte — estimation fiable'
-          : Math.abs(delta) <= 12 ? 'Ecart modéré — vérifiez les hypothèses'
-          : 'Ecart important — investigation recommandée'}
-      </small>
-    </div>
+    <section className="awb-card">
+      <div className="awb-card-head">
+        <div>
+          <h3>Prix de vente réel</h3>
+          <p>À renseigner une fois la transaction conclue — reste dans l'historique du dossier.</p>
+        </div>
+      </div>
+      <div className="algo-confirm-form">
+        <input
+          type="number"
+          min="10000"
+          placeholder="Prix de vente réel"
+          value={price}
+          onChange={(event) => setPrice(event.target.value)}
+        />
+        <button className="topbar-btn topbar-btn-primary" disabled={!price || !hasSurface} onClick={handleSubmit}>
+          Enregistrer
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -165,54 +183,47 @@ function AiSynthesisPreview({ syntheseNotes, propertyContext }) {
 
 export default function SyntheseView({
   dossier,
-  mlEstimate,
+  estimate,
   manualEstimate,
   metrics,
   areaScores,
   trend,
   filteredRefs,
   syntheseNotes,
+  onConfirmPrice,
 }) {
   const target = dossier.target || {};
   const surfaceM2 = target.surfaceM2 || 0;
-  const algoPm2 = mlEstimate?.correctedPm2 || null;
-  const analystPm2 = manualEstimate || null;
-  const algoPrice = algoPm2 && surfaceM2 ? Math.round(algoPm2 * surfaceM2) : null;
-  const analystPrice = analystPm2 && surfaceM2 ? Math.round(analystPm2 * surfaceM2) : null;
+  const marketPm2 = estimate?.estimatedPm2 || null;
+  const finalPm2 = manualEstimate || marketPm2 || null;
+  const finalPrice = finalPm2 && surfaceM2 ? Math.round(finalPm2 * surfaceM2) : null;
 
   const propertyContext = [
     `Adresse : ${dossier.address || 'Non renseignée'}`,
     `Type : ${target.type === 'House' ? 'Maison' : 'Appartement'} · ${surfaceM2} m² · ${target.rooms || '—'} pièces`,
     `Condition : ${target.condition || 'Non renseignée'} · DPE : ${target.dpe || 'Non renseigné'}`,
-    `Prix analyste : ${analystPm2 ? `${Math.round(analystPm2).toLocaleString('fr-FR')} €/m²` : '—'}`,
-    `Prix algo : ${algoPm2 ? `${Math.round(algoPm2).toLocaleString('fr-FR')} €/m²` : '—'}`,
+    `Prix retenu : ${finalPm2 ? `${Math.round(finalPm2).toLocaleString('fr-FR')} €/m²` : '—'}`,
     `Marché : ${metrics?.n ?? 0} refs · moy ${metrics?.avgWeighted ? Math.round(metrics.avgWeighted).toLocaleString('fr-FR') : '—'} €/m²`,
   ].join('\n');
 
   return (
     <div className="synthese-view">
-      <DeltaBanner analystPm2={analystPm2} algoPm2={algoPm2} />
-
       <div className="syn-compare-row">
         <div className="syn-compare-card syn-card-analyst">
-          <span className="syn-compare-kicker">Estimation Analyste</span>
-          <strong className="syn-compare-pm2">{analystPm2 ? fmtPm2(analystPm2) : '—'}</strong>
-          <span className="syn-compare-price">{analystPrice ? fmtPrice(analystPrice) : 'Non renseignée'}</span>
-          <small>Basée sur votre expertise terrain</small>
-        </div>
-
-        <div className="syn-compare-vs">VS</div>
-
-        <div className="syn-compare-card syn-card-algo">
-          <span className="syn-compare-kicker">Estimation Algorithmique</span>
-          <strong className="syn-compare-pm2">{algoPm2 ? fmtPm2(algoPm2) : '—'}</strong>
-          <span className="syn-compare-price">{algoPrice ? fmtPrice(algoPrice) : 'Insuffisant'}</span>
-          <div className="syn-compare-meta">
-            {mlEstimate?.confidence && (
-              <span>{renderStars(mlEstimate.confidence.stars)} {mlEstimate.confidence.label}</span>
-            )}
-            {mlEstimate && <span>{mlEstimate.nComps} comps</span>}
-          </div>
+          <span className="syn-compare-kicker">{manualEstimate ? 'Estimation retenue' : 'Estimation provisoire (repère marché)'}</span>
+          <strong className="syn-compare-pm2">{finalPm2 ? fmtPm2(finalPm2) : '—'}</strong>
+          <span className="syn-compare-price">{finalPrice ? fmtPrice(finalPrice) : 'Non renseignée'}</span>
+          <small>
+            {manualEstimate
+              ? "Validée dans l'onglet Analyste"
+              : "À valider dans l'onglet Analyste — repère basé sur les comparables"}
+          </small>
+          {estimate?.confidence && (
+            <div className="syn-compare-meta">
+              <span>{renderStars(estimate.confidence.stars)} {estimate.confidence.label}</span>
+              <span>{estimate.nComps} comps</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -234,10 +245,10 @@ export default function SyntheseView({
             <span>Ecart-type</span>
             <strong>{fmtPm2(metrics.stdDev)}</strong>
           </div>
-          {mlEstimate?.confidence && (
+          {estimate?.confidence && (
             <div className="syn-kpi">
               <span>Confiance</span>
-              <strong>{mlEstimate.confidence.score}/100</strong>
+              <strong>{estimate.confidence.score}/100</strong>
             </div>
           )}
         </div>
@@ -288,12 +299,14 @@ export default function SyntheseView({
         )}
       </section>
 
-      {dossier.confirmed && (
+      {dossier.confirmed ? (
         <div className="syn-confirmed-banner">
           <span>Prix confirmé</span>
           <strong>{fmtK(dossier.confirmed.actualPrice)}</strong>
           <small>{fmtPm2(dossier.confirmed.actualPm2)} · confirmé le {new Date(dossier.confirmed.confirmedAt).toLocaleDateString('fr-FR')}</small>
         </div>
+      ) : onConfirmPrice && (
+        <ConfirmPriceForm surfaceM2={surfaceM2} onConfirm={onConfirmPrice} />
       )}
 
       <style>{`

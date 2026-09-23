@@ -19,16 +19,9 @@ router.post('/login', authController.login);
 
 /**
  * @route   GET /api/auth/me
- * @desc    Profil + modèle ML du compte courant
+ * @desc    Profil du compte courant
  * @access  Privé
  */
 router.get('/me', requireAuth, authController.me);
-
-/**
- * @route   PUT /api/auth/model
- * @desc    Sauvegarder le modèle ML personnel (calibration sur ventes confirmées)
- * @access  Privé
- */
-router.put('/model', requireAuth, authController.updateModel);
 
 module.exports = router;

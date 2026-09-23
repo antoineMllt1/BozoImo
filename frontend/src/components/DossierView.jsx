@@ -2,14 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_ANALYST_FILTERS } from '../utils/dossiers';
 import { stripDvfSnapshot, stripSelogerSnapshot } from '../utils/storage';
 import { normalizeRefs, applyFilters, computeMetrics, suggestRange } from '../utils/edm';
-import { addConfirmation, computeAreaScores, computeEstimateFromRefs } from '../utils/model';
+import { buildBaseAnalystAdjustments, computeAreaScores, computeEstimateFromRefs } from '../utils/model';
 import { exportDossierPdf } from '../utils/report';
 import { fmtDate } from '../utils/formatters';
 import { estateTypesForTargetType, itemTypesForTargetType, matchesTargetPropertyType } from '../utils/propertyType';
 import { buildTrendFromRefs } from '../utils/trend';
 import DataWorkbench from './DataWorkbench';
 import AnalystWorkbench from './AnalystWorkbench';
-import AlgoWorkbench from './AlgoWorkbench';
 import NeighborhoodWorkbench from './NeighborhoodWorkbench';
 import SyntheseView from './SyntheseView';
 import Dropdown from './Dropdown';
@@ -75,7 +74,7 @@ async function requestNeighborhoodProfile(payload) {
   throw lastError || new Error('Route Villes a vivre indisponible');
 }
 
-export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, onBack }) {
+export default function DossierView({ dossier, onUpdate, onBack }) {
   const isBuilding = dossier.analysisMode === 'building';
   const target = dossier.target || {};
 
@@ -93,7 +92,6 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
   const [exporting, setExporting] = useState(false);
   const [neighborhoodReloading, setNeighborhoodReloading] = useState(false);
   const [neighborhoodError, setNeighborhoodError] = useState('');
-  const [disabledFactors, setDisabledFactors] = useState(dossier.disabledFactors || {});
   const [syntheseNotes, setSyntheseNotes] = useState(dossier.syntheseNotes || '');
   const [iqrApplied, setIqrApplied] = useState(
     dossier.analystFilters?.ppm2Min != null || dossier.analystFilters?.ppm2Max != null
@@ -156,22 +154,31 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
     [allRefs, dossier.analystSourceWeights, effectiveTaux, filtered, filters]
   );
 
-  const mlEstimate = useMemo(
-    () => computeEstimateFromRefs(
-      filtered,
-      dossier.target,
-      model.correctionFactor,
-      dossier.areaContext || null,
-      { lat: dossier.lat, lng: dossier.lng }
-    ),
-    [filtered, dossier.areaContext, dossier.lat, dossier.lng, dossier.target, model.correctionFactor]
+  // Aperçu marché (base marché de l'onglet Analyste × pondérations du bien) —
+  // sert de repère (carte portefeuille, ligne de la synthèse) tant que
+  // l'analyste n'a pas validé sa propre estimation. On réutilise la même
+  // base que l'onglet Analyste pour ne jamais afficher deux chiffres qui
+  // divergent.
+  const basePm2 = metrics?.avgWeighted ?? metrics?.avg ?? null;
+  const marketEstimate = useMemo(
+    () => computeEstimateFromRefs(filtered, dossier.target, { lat: dossier.lat, lng: dossier.lng }, basePm2),
+    [filtered, dossier.lat, dossier.lng, dossier.target, basePm2]
   );
 
-  const areaScores = mlEstimate?.areaScores || computeAreaScores(dossier.areaContext || null);
+  // Pondérations calculées automatiquement depuis les infos du bien —
+  // visibles et modifiables dans l'onglet Analyste.
+  const baseAdjustments = useMemo(
+    () => buildBaseAnalystAdjustments(dossier.target),
+    [dossier.target]
+  );
+
+  const areaScores = useMemo(() => computeAreaScores(dossier.areaContext || null), [dossier.areaContext]);
+
+  const estimatePm2 = manualEstimate ?? marketEstimate?.estimatedPm2 ?? metrics?.avgWeighted ?? metrics?.avg ?? null;
 
   const trend = useMemo(
-    () => buildTrendFromRefs(allRefs, mlEstimate?.correctedPm2),
-    [allRefs, mlEstimate?.correctedPm2]
+    () => buildTrendFromRefs(allRefs, estimatePm2),
+    [allRefs, estimatePm2]
   );
 
   const persistFilters = useCallback((nextFilters) => {
@@ -286,11 +293,6 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
     persistDossier({ target: nextTarget }, guessWorkStatus(dossier.status));
   }, [dossier.status, persistDossier]);
 
-  const handleDisabledFactorsChange = useCallback((nextDisabled) => {
-    setDisabledFactors(nextDisabled);
-    persistDossier({ disabledFactors: nextDisabled }, guessWorkStatus(dossier.status));
-  }, [dossier.status, persistDossier]);
-
   const handleSyntheseNotesChange = useCallback((value) => {
     setSyntheseNotes(value);
     persistDossier({ syntheseNotes: value }, guessWorkStatus(dossier.status));
@@ -319,27 +321,11 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
     persistDossier({ manualEstimate: value }, 'estimated');
   }, [persistDossier]);
 
-  const handleConfirm = useCallback((basePm2, actualPrice) => {
+  // Enregistre le prix de vente réel, pour l'historique — n'influence plus
+  // aucun calcul (l'ancienne correction ML a été retirée).
+  const handleConfirm = useCallback((actualPrice) => {
     const surfaceM2 = dossier.target?.surfaceM2;
     if (!surfaceM2) return;
-
-    const result = addConfirmation(model.samples, {
-      basePm2,
-      actualPrice,
-      surfaceM2,
-      dossierId: dossier.id,
-      address: dossier.address,
-    });
-
-    const updatedModel = {
-      ...model,
-      samples: result.samples,
-      correctionFactor: result.correctionFactor,
-      mae: result.mae,
-      mape: result.mape,
-    };
-
-    onConfirmPrice(updatedModel);
     persistDossier({
       confirmed: {
         actualPrice,
@@ -347,7 +333,7 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
         confirmedAt: new Date().toISOString(),
       },
     }, 'confirmed');
-  }, [dossier, model, onConfirmPrice, persistDossier]);
+  }, [dossier.target?.surfaceM2, persistDossier]);
 
   const handleReloadMarketData = useCallback(async () => {
     if (reloadingRadius || !dossier.lat || !dossier.lng) return;
@@ -454,12 +440,12 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
     try {
       await exportDossierPdf({
         dossier,
-        estimate: mlEstimate,
+        estimate: marketEstimate,
         metrics,
         filteredRefs: filtered,
         trend,
         areaScores,
-        analystAdjustments,
+        analystAdjustments: [...baseAdjustments, ...analystAdjustments],
         syntheseNotes,
         logoDataUrl: dossier.reportBrandLogo?.dataUrl || null,
         chartNodes: { mapNode: tab === 'data' ? exportMapRef.current : null },
@@ -467,13 +453,13 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
     } finally {
       setExporting(false);
     }
-  }, [dossier, filtered, metrics, mlEstimate, tab, areaScores, analystAdjustments, syntheseNotes]);
+  }, [dossier, filtered, metrics, marketEstimate, tab, areaScores, baseAdjustments, analystAdjustments, syntheseNotes]);
 
   const summaryCards = [
     { label: 'Références retenues', value: filtered.length },
     { label: 'DVF', value: allRefs.filter(ref => ref.source === 'dvf').length },
     { label: 'SeLoger', value: allRefs.filter(ref => ref.source === 'seloger').length },
-    { label: 'Algo', value: mlEstimate ? `${Math.round(mlEstimate.correctedPm2).toLocaleString('fr-FR')} €/m²` : '—' },
+    { label: 'Estimation', value: estimatePm2 ? `${Math.round(estimatePm2).toLocaleString('fr-FR')} €/m²` : '—' },
   ];
 
   return (
@@ -532,7 +518,6 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
         <button className={`clean-tab ${tab === 'data' ? 'active' : ''}`} onClick={() => setTab('data')}>Données</button>
         <button className={`clean-tab ${tab === 'neighborhood' ? 'active' : ''}`} onClick={() => setTab('neighborhood')}>Quartier</button>
         <button className={`clean-tab ${tab === 'analyst' ? 'active' : ''}`} onClick={() => setTab('analyst')}>Analyste</button>
-        <button className={`clean-tab ${tab === 'algo' ? 'active' : ''}`} onClick={() => setTab('algo')}>Algo</button>
         <button className={`clean-tab ${tab === 'synthese' ? 'active' : ''}`} onClick={() => setTab('synthese')}>Synthèse</button>
         {isBuilding && (
           <button className={`clean-tab ${tab === 'gdp' ? 'active' : ''}`} onClick={() => setTab('gdp')}>Grille</button>
@@ -581,6 +566,7 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
             metrics={metrics}
             areaScores={areaScores}
             target={target}
+            baseAdjustments={baseAdjustments}
             analystBasePm2={analystBasePm2}
             analystAdjustments={analystAdjustments}
             manualEstimate={manualEstimate}
@@ -593,30 +579,17 @@ export default function DossierView({ dossier, model, onUpdate, onConfirmPrice, 
           />
         )}
 
-        {tab === 'algo' && (
-          <AlgoWorkbench
-            estimate={mlEstimate}
-            filteredRefs={filtered}
-            model={model}
-            target={target}
-            onTargetChange={handleTargetChange}
-            onConfirm={handleConfirm}
-            alreadyConfirmed={dossier.confirmed}
-            disabledFactors={disabledFactors}
-            onDisabledFactorsChange={handleDisabledFactorsChange}
-          />
-        )}
-
         {tab === 'synthese' && (
           <SyntheseView
             dossier={dossier}
-            mlEstimate={mlEstimate}
+            estimate={marketEstimate}
             manualEstimate={manualEstimate}
             metrics={metrics}
             areaScores={areaScores}
             trend={trend}
             filteredRefs={filtered}
             syntheseNotes={syntheseNotes}
+            onConfirmPrice={handleConfirm}
           />
         )}
 

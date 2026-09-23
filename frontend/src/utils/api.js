@@ -65,8 +65,6 @@ export const login = (email, password) =>
 
 export const fetchMe = () => request('/auth/me');
 
-export const saveModelRemote = (model) => request('/auth/model', { method: 'PUT', body: model });
-
 // ── Dossiers ──────────────────────────────────────────────────────────
 export const fetchDossiers = () => request('/dossiers').then(data => data?.dossiers || []);
 

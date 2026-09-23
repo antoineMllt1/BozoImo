@@ -91,14 +91,3 @@ exports.me = async (req, res) => {
   }
 };
 
-/** Sauvegarde le modèle ML personnel de l'agent (calibration sur ses ventes confirmées). */
-exports.updateModel = async (req, res) => {
-  try {
-    const model = req.body && typeof req.body === 'object' ? req.body : DEFAULT_MODEL;
-    await db.query('UPDATE users SET model = $1 WHERE id = $2', [JSON.stringify(model), req.userId]);
-    res.json({ ok: true });
-  } catch (error) {
-    console.error('Erreur updateModel:', error.message);
-    res.status(500).json({ error: 'Erreur lors de la sauvegarde du modèle', details: error.message });
-  }
-};

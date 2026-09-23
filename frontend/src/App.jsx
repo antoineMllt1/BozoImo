@@ -1,12 +1,10 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import './App.css';
 import './styles/additions.css';
-import { computeEstimate, computeEstimateFromRefs, modelStats } from './utils/model';
-import { normalizeRefs, applyFilters } from './utils/edm';
+import { computeEstimate, computeEstimateFromRefs } from './utils/model';
+import { normalizeRefs, applyFilters, computeMetrics } from './utils/edm';
 import { normalizeDossier } from './utils/dossiers';
-import { fmtPm2 } from './utils/formatters';
-import { getToken, setToken, fetchMe, fetchDossiers, upsertDossierRemote, deleteDossierRemote, saveModelRemote } from './utils/api';
-import { DEFAULT_MODEL } from './utils/storage';
+import { getToken, setToken, fetchMe, fetchDossiers, upsertDossierRemote, deleteDossierRemote } from './utils/api';
 import HomeView from './components/HomeView';
 import CommandPalette from './components/CommandPalette';
 import AuthView from './components/AuthView';
@@ -39,7 +37,7 @@ function deriveActiveStatus(dossier) {
   return 'draft';
 }
 
-function hydrateEstimate(dossier, correctionFactor) {
+function hydrateEstimate(dossier) {
   const normalized = normalizeDossier({
     ...dossier,
     updatedAt: dossier.updatedAt || new Date().toISOString(),
@@ -48,22 +46,25 @@ function hydrateEstimate(dossier, correctionFactor) {
   const allRefs = normalizeRefs(normalized.dvfSnapshot, normalized.selogerSnapshot, 0.05);
   const refs = allRefs.map(ref => ({ ...ref, excluded: normalized.analystExclusions?.[ref.id] || false }));
   const filteredRefs = applyFilters(refs, normalized.analystFilters || {}, normalized.target?.type || null);
+  // Même base que l'onglet Analyste (moyenne pondérée des comparables retenus)
+  // pour que la carte du portefeuille n'affiche jamais un chiffre différent
+  // de celui du dossier une fois ouvert.
+  const metrics = computeMetrics(allRefs, filteredRefs, normalized.analystFilters || {}, 0.05, null, normalized.analystSourceWeights || { dvf: 1, seloger: 1 });
+  const basePm2 = metrics?.avgWeighted ?? metrics?.avg ?? null;
 
   const lastEstimate = filteredRefs.length > 0
     ? computeEstimateFromRefs(
         filteredRefs,
         normalized.target,
-        correctionFactor,
-        normalized.areaContext || null,
-        { lat: normalized.lat, lng: normalized.lng }
+        { lat: normalized.lat, lng: normalized.lng },
+        basePm2
       )
     : computeEstimate(
         normalized.dvfSnapshot?.data?.features || [],
         normalized.selectedComps || [],
         normalized.target,
-        correctionFactor,
-        normalized.areaContext || null,
-        { lat: normalized.lat, lng: normalized.lng }
+        { lat: normalized.lat, lng: normalized.lng },
+        basePm2
       );
 
   return normalizeDossier({ ...normalized, lastEstimate });
@@ -78,7 +79,6 @@ export default function App() {
   const [view, setView] = useState('home');
   const [dossiers, setDossiers] = useState([]);
   const [activeDossierId, setActiveDossierId] = useState(null);
-  const [model, setModel] = useState(DEFAULT_MODEL);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(uiPrefs.sidebarCollapsed);
   const [commandOpen, setCommandOpen] = useState(false);
 
@@ -86,8 +86,7 @@ export default function App() {
   const [authStatus, setAuthStatus] = useState('checking'); // checking | authenticated | unauthenticated
   const [user, setUser] = useState(null);
 
-  const loadAccountData = useCallback(async (nextModel) => {
-    if (nextModel) setModel({ ...DEFAULT_MODEL, ...nextModel });
+  const loadAccountData = useCallback(async () => {
     try {
       const remoteDossiers = await fetchDossiers();
       setDossiers(remoteDossiers.map(normalizeDossier));
@@ -104,10 +103,10 @@ export default function App() {
       return;
     }
     fetchMe()
-      .then(async ({ user: me, model: remoteModel }) => {
+      .then(async ({ user: me }) => {
         if (cancelled) return;
         setUser(me);
-        await loadAccountData(remoteModel);
+        await loadAccountData();
         if (!cancelled) setAuthStatus('authenticated');
       })
       .catch(() => {
@@ -116,10 +115,10 @@ export default function App() {
     return () => { cancelled = true; };
   }, [loadAccountData]);
 
-  const handleAuthenticated = useCallback(async ({ token, user: newUser, model: newModel }) => {
+  const handleAuthenticated = useCallback(async ({ token, user: newUser }) => {
     setToken(token);
     setUser(newUser);
-    await loadAccountData(newModel);
+    await loadAccountData();
     setAuthStatus('authenticated');
   }, [loadAccountData]);
 
@@ -127,7 +126,6 @@ export default function App() {
     setToken(null);
     setUser(null);
     setDossiers([]);
-    setModel(DEFAULT_MODEL);
     setActiveDossierId(null);
     setView('home');
     setAuthStatus('unauthenticated');
@@ -154,41 +152,28 @@ export default function App() {
   );
 
   const activeDossier = orderedDossiers.find(dossier => dossier.id === activeDossierId) || null;
-  const stats = modelStats(model.samples, model.correctionFactor);
-
   const handleCreated = useCallback((dossier) => {
     const now = new Date().toISOString();
-    const hydrated = hydrateEstimate(
-      {
-        ...dossier,
-        id: dossier.id || makeId(),
-        createdAt: dossier.createdAt || now,
-        updatedAt: now,
-        status: dossier.status || 'draft',
-      },
-      model.correctionFactor
-    );
+    const hydrated = hydrateEstimate({
+      ...dossier,
+      id: dossier.id || makeId(),
+      createdAt: dossier.createdAt || now,
+      updatedAt: now,
+      status: dossier.status || 'draft',
+    });
     setDossiers(prev => [hydrated, ...prev]);
     setActiveDossierId(hydrated.id);
     setView('dossier');
     persistDossierRemote(hydrated);
-  }, [model.correctionFactor]);
+  }, []);
 
   const handleUpdate = useCallback((updated) => {
-    const hydrated = hydrateEstimate(
-      {
-        ...updated,
-        updatedAt: new Date().toISOString(),
-      },
-      model.correctionFactor
-    );
+    const hydrated = hydrateEstimate({
+      ...updated,
+      updatedAt: new Date().toISOString(),
+    });
     setDossiers(prev => prev.map(dossier => (dossier.id === hydrated.id ? hydrated : dossier)));
     persistDossierRemote(hydrated);
-  }, [model.correctionFactor]);
-
-  const handleConfirmPrice = useCallback((updatedModel) => {
-    setModel(updatedModel);
-    saveModelRemote(updatedModel).catch(err => console.warn('Sauvegarde du modèle échouée :', err.message));
   }, []);
 
   const handleOpen = useCallback((id) => {
@@ -220,12 +205,12 @@ export default function App() {
       archivedAt: null,
       status: 'draft',
       confirmed: null,
-    }, model.correctionFactor);
+    });
     setDossiers(prev => [duplicated, ...prev]);
     setActiveDossierId(duplicated.id);
     setView('dossier');
     persistDossierRemote(duplicated);
-  }, [dossiers, model.correctionFactor]);
+  }, [dossiers]);
 
   const handleArchive = useCallback((id) => {
     setDossiers(prev => prev.map(dossier => {
@@ -361,30 +346,6 @@ export default function App() {
           <span>Nouvelle analyse</span>
         </button>
 
-        <div className="sb-model-box">
-          <div className="sb-model-title">Modele ML</div>
-          {stats ? (
-            <>
-              <div className="sb-model-row">
-                <span>Confirmations</span>
-                <span className="sb-model-val">{stats.n}</span>
-              </div>
-              <div className="sb-model-row">
-                <span>Erreur moy.</span>
-                <span className="sb-model-val">{fmtPm2(stats.mae)}</span>
-              </div>
-              <div className="sb-model-row">
-                <span>Facteur</span>
-                <span className={`sb-model-val ${stats.biasPct > 2 ? 'up' : stats.biasPct < -2 ? 'down' : ''}`}>
-                  x {stats.correctionFactor.toFixed(3)}
-                </span>
-              </div>
-            </>
-          ) : (
-            <p className="sb-cold">Non calibre. Une confirmation suffit pour l&apos;amorcer.</p>
-          )}
-        </div>
-
         <div className="sb-account">
           <span className="sb-account-name" title={user?.email}>{user?.name || user?.email}</span>
           <button className="sb-account-logout" onClick={handleLogout} title="Se déconnecter">↪</button>
@@ -433,7 +394,6 @@ export default function App() {
             {view === 'home' && (
               <HomeView
                 dossiers={orderedDossiers}
-                model={model}
                 onNew={() => setView('new')}
                 onScrape={() => setView('scrape')}
                 onOpen={handleOpen}
@@ -453,9 +413,7 @@ export default function App() {
             {view === 'dossier' && activeDossier && (
               <DossierView
                 dossier={activeDossier}
-                model={model}
                 onUpdate={handleUpdate}
-                onConfirmPrice={handleConfirmPrice}
                 onBack={handleBack}
               />
             )}

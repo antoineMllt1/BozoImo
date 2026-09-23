@@ -1,5 +1,4 @@
 import { fmtDate, fmtK, fmtPm2 } from '../utils/formatters';
-import { modelStats } from '../utils/model';
 
 const STATUS_LABEL = {
   draft: 'Brouillon',
@@ -76,7 +75,7 @@ function DossierCard({ dossier, onOpen, onDelete, onDuplicate, onArchive }) {
         <div className="dossier-card-metrics">
           <div>
             <span>Estimation</span>
-            <strong>{estimate ? fmtPm2(estimate.correctedPm2) : '-'}</strong>
+            <strong>{estimate ? fmtPm2(estimate.estimatedPm2) : '-'}</strong>
             <small>{estimate?.estimatedPrice ? fmtK(estimate.estimatedPrice) : 'En attente'}</small>
           </div>
           <div>
@@ -123,7 +122,6 @@ function DossierCard({ dossier, onOpen, onDelete, onDuplicate, onArchive }) {
 
 export default function HomeView({
   dossiers,
-  model,
   onNew,
   onScrape,
   onOpen,
@@ -131,55 +129,11 @@ export default function HomeView({
   onDuplicate,
   onArchive,
 }) {
-  const stats = modelStats(model.samples, model.correctionFactor);
   const activeDossiers = dossiers.filter(dossier => !dossier.archivedAt);
   const archivedDossiers = dossiers.filter(dossier => dossier.archivedAt);
 
   return (
     <div className="home-view">
-      {stats ? (
-        <div className="model-bar">
-          <div className="model-stat">
-            <span className="model-stat-label">Confirmations</span>
-            <span className="model-stat-value">{stats.n}</span>
-          </div>
-          <div className="model-stat">
-            <span className="model-stat-label">Erreur moyenne</span>
-            <span className="model-stat-value">{fmtPm2(stats.mae)}</span>
-          </div>
-          <div className="model-stat">
-            <span className="model-stat-label">Erreur %</span>
-            <span className="model-stat-value">{stats.mape} %</span>
-          </div>
-          <div className="model-stat">
-            <span className="model-stat-label">Facteur correcteur</span>
-            <span className={`model-stat-value ${stats.biasPct > 2 ? 'val-up' : stats.biasPct < -2 ? 'val-down' : ''}`}>
-              x {stats.correctionFactor.toFixed(3)}
-              <span className="model-stat-hint">
-                ({stats.biasPct > 0 ? '+' : ''}{stats.biasPct}%)
-              </span>
-            </span>
-          </div>
-          <div className="model-stat model-stat-info">
-            <span className="model-stat-label">Etat du modele</span>
-            <span className="model-stat-value model-stat-desc">
-              Mediane ponderee, ajustements contextuels et correction basee sur {stats.n} confirmation{stats.n > 1 ? 's' : ''}.
-            </span>
-          </div>
-        </div>
-      ) : (
-        <div className="model-bar model-bar-cold">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
-          <p>
-            <strong>Modele non encore calibre.</strong> Confirmez un prix reel pour enclencher la correction ML.
-          </p>
-        </div>
-      )}
-
       <div className="home-hero">
         <div className="home-hero-copy">
           <span className="home-kicker">Pipeline d&apos;analyse</span>

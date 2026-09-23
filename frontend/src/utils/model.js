@@ -61,12 +61,10 @@ function makeFactor(factor, label = null, meta = null) {
   };
 }
 
-function scoreToFactor(score, minFactor, maxFactor) {
-  if (score == null) return 1;
-  const centered = clamp((score - 50) / 50, -1, 1);
-  if (centered >= 0) return 1 + centered * (maxFactor - 1);
-  return 1 + centered * (1 - minFactor);
-}
+// ── Pondérations liées au bien lui-même ─────────────────────────────────
+// Facteurs transparents (pas de ML) appliqués sur la base marché. Ce sont
+// ces mêmes facteurs qui alimentent les "pondérations de base" visibles et
+// modifiables dans l'onglet Analyste.
 
 export function floorElevatorFactor(floor, totalFloors, hasElevator) {
   if (floor == null) return makeFactor(1);
@@ -100,7 +98,7 @@ export function orientationFactor(orientation) {
   return map[orientation] || makeFactor(1);
 }
 
-export function amenitiesFactor(hasBalcony, hasParking, hasTerrace, hasCellar) {
+export function outdoorFactor(hasBalcony, hasTerrace, hasPool, hasGarden, type) {
   let factor = 1;
   const labels = [];
   if (hasBalcony === true) {
@@ -111,6 +109,22 @@ export function amenitiesFactor(hasBalcony, hasParking, hasTerrace, hasCellar) {
     factor += 0.045;
     labels.push('Terrasse (+4.5%)');
   }
+  if (hasPool === true) {
+    const pct = type === 'House' ? 0.1 : 0.04;
+    factor += pct;
+    labels.push(`Piscine (+${Math.round(pct * 100)}%)`);
+  }
+  if (hasGarden === true) {
+    const pct = type === 'House' ? 0.06 : 0.03;
+    factor += pct;
+    labels.push(`Jardin (+${Math.round(pct * 100)}%)`);
+  }
+  return makeFactor(factor, labels.length ? labels.join(' · ') : null);
+}
+
+export function parkingFactor(hasParking, hasCellar) {
+  let factor = 1;
+  const labels = [];
   if (hasParking === true) {
     factor += 0.025;
     labels.push('Parking (+2.5%)');
@@ -146,14 +160,6 @@ export function renovationFactor(condition) {
   return map[condition] || makeFactor(1);
 }
 
-export function buildingAgeFactor(yearBuilt) {
-  if (!yearBuilt) return makeFactor(1);
-  if (yearBuilt < 1948) return makeFactor(0.85, 'Avant 1948 (-15%)');
-  if (yearBuilt <= 1974) return makeFactor(0.94, `Construit en ${yearBuilt} (-6%)`);
-  if (yearBuilt >= 2001) return makeFactor(1.05, `Construit en ${yearBuilt} (+5%)`);
-  return makeFactor(1);
-}
-
 export function viewFactor(viewQuality) {
   const map = {
     open: makeFactor(1.06, 'Vue degagee (+6%)'),
@@ -164,19 +170,10 @@ export function viewFactor(viewQuality) {
   return map[viewQuality] || makeFactor(1);
 }
 
-export function poolFactor(hasPool, type) {
-  if (hasPool !== true) return makeFactor(1);
-  return type === 'House' ? makeFactor(1.1, 'Piscine (+10%)') : makeFactor(1.04, 'Piscine (+4%)');
-}
-
-export function gardenFactor(hasGarden, type) {
-  if (hasGarden !== true) return makeFactor(1);
-  return type === 'House' ? makeFactor(1.06, 'Jardin (+6%)') : makeFactor(1.03, 'Jardin (+3%)');
-}
-
-export function duplexFactor(isDuplex) {
-  return isDuplex === true ? makeFactor(1.06, 'Duplex/Triplex (+6%)') : makeFactor(1);
-}
+// ── Scores de quartier ───────────────────────────────────────────────────
+// Purement indicatifs (onglet Quartier + radar de la synthèse) : ils ne
+// modifient plus le prix calculé, contrairement aux pondérations du bien
+// ci-dessus.
 
 function computeTransportScore(areaContext) {
   const nearestDistance = areaContext?.transport?.nearestStop?.distanceM;
@@ -372,156 +369,41 @@ export function computeAreaScores(areaContext) {
   };
 }
 
-export function transitFactor(areaContext) {
-  const score = computeTransportScore(areaContext);
-  if (score == null) return makeFactor(1);
-  const factor = scoreToFactor(score, 0.97, 1.06);
-  return makeFactor(factor, `Transport (${score}/100)`);
-}
+// ── Pondérations de base (bien) ──────────────────────────────────────────
 
-export function schoolFactor(areaContext) {
-  const score = computeEducationScore(areaContext);
-  if (score == null) return makeFactor(1);
-  const factor = scoreToFactor(score, 0.99, 1.03);
-  return makeFactor(factor, `Ecoles (${score}/100)`);
-}
+const BASE_ADJUSTMENT_FACTORS = [
+  ['dpe', target => dpeFactor(target?.dpe ?? null)],
+  ['condition', target => renovationFactor(target?.condition ?? null)],
+  ['floor', target => floorElevatorFactor(target?.floor ?? null, target?.totalFloors ?? null, target?.hasElevator ?? null)],
+  ['orientation', target => orientationFactor(target?.orientation ?? null)],
+  ['outdoor', target => outdoorFactor(target?.hasBalcony ?? null, target?.hasTerrace ?? null, target?.hasPool ?? null, target?.hasGarden ?? null, target?.type ?? null)],
+  ['parking', target => parkingFactor(target?.hasParking ?? null, target?.hasCellar ?? null)],
+  ['view', target => viewFactor(target?.viewQuality ?? null)],
+];
 
-export function amenityContextFactor(areaContext) {
-  const score = computeWalkScore(areaContext);
-  if (score == null) return makeFactor(1);
-  const factor = scoreToFactor(score, 0.97, 1.04);
-  return makeFactor(factor, `Walk score (${score}/100)`);
-}
-
-export function riskFactor(areaContext) {
-  const floodPresent = areaContext?.risks?.flood?.present;
-  const naturalRiskCount = areaContext?.risks?.naturalRiskCount ?? 0;
-  if (floodPresent == null && naturalRiskCount === 0) return makeFactor(1);
-  if (floodPresent === true) return makeFactor(0.92, 'Risque inondation (-8%)');
-  if (naturalRiskCount >= 4) return makeFactor(0.97, 'Contexte risques naturels dense (-3%)');
-  return makeFactor(1);
-}
-
-export function noiseFactor(areaContext) {
-  const nearestRailStation = areaContext?.noise?.nearestRailStation?.distanceM;
-  if (nearestRailStation == null) return makeFactor(1);
-  if (nearestRailStation <= 150) return makeFactor(0.96, 'Proximite gare ferroviaire (-4%)');
-  if (nearestRailStation <= 300) return makeFactor(0.98, 'Proximite transport ferroviaire (-2%)');
-  return makeFactor(1);
-}
-
-export function incomeFactor(areaContext) {
-  const score = computeEconomyScore(areaContext);
-  if (score == null) return makeFactor(1);
-  const factor = scoreToFactor(score, 0.98, 1.03);
-  return makeFactor(factor, `Economie commune (${score}/100)`);
-}
-
-export function safetyContextFactor(areaContext) {
-  const score = computeSafetyScore(areaContext);
-  if (score == null) return makeFactor(1);
-  const factor = scoreToFactor(score, 0.95, 1.02);
-  return makeFactor(factor, `Securite commune (${score}/100)`);
-}
-
-export function servicesContextFactor(areaContext) {
-  const score = computeServicesScore(areaContext);
-  if (score == null) return makeFactor(1);
-  const factor = scoreToFactor(score, 0.98, 1.03);
-  return makeFactor(factor, `Services commune (${score}/100)`);
-}
-
-export function liveabilityFactor(areaContext) {
-  const score = computeLiveabilityScore(areaContext);
-  if (score == null) return makeFactor(1);
-  const factor = scoreToFactor(score, 0.98, 1.04);
-  return makeFactor(factor, `Cadre de vie (${score}/100)`);
-}
-
-function buildAdjustments(target, areaContext) {
-  const areaScores = computeAreaScores(areaContext);
-  const floorAdj = floorElevatorFactor(target?.floor ?? null, target?.totalFloors ?? null, target?.hasElevator ?? null);
-  const orientAdj = orientationFactor(target?.orientation ?? null);
-  const amenitAdj = amenitiesFactor(
-    target?.hasBalcony ?? null,
-    target?.hasParking ?? null,
-    target?.hasTerrace ?? null,
-    target?.hasCellar ?? null
-  );
-  const dpeAdj = dpeFactor(target?.dpe ?? null);
-  const conditionAdj = renovationFactor(target?.condition ?? null);
-  const ageAdj = buildingAgeFactor(target?.yearBuilt ?? null);
-  const viewAdj = viewFactor(target?.viewQuality ?? null);
-  const poolAdj = poolFactor(target?.hasPool ?? null, target?.type ?? null);
-  const gardenAdj = gardenFactor(target?.hasGarden ?? null, target?.type ?? null);
-  const duplexAdj = duplexFactor(target?.isDuplex ?? null);
-
-  const rawContextAdjustments = [
-    transitFactor(areaContext),
-    schoolFactor(areaContext),
-    amenityContextFactor(areaContext),
-    riskFactor(areaContext),
-    noiseFactor(areaContext),
-    safetyContextFactor(areaContext),
-    servicesContextFactor(areaContext),
-    incomeFactor(areaContext),
-    liveabilityFactor(areaContext),
-    areaScores.neighborhoodPremium,
-  ];
-
-  const charAdjustments = [
-    ['floorAdj', floorAdj],
-    ['orientAdj', orientAdj],
-    ['amenitAdj', amenitAdj],
-    ['dpeAdj', dpeAdj],
-    ['conditionAdj', conditionAdj],
-    ['ageAdj', ageAdj],
-    ['viewAdj', viewAdj],
-    ['poolAdj', poolAdj],
-    ['gardenAdj', gardenAdj],
-    ['duplexAdj', duplexAdj],
-  ];
-
+function buildAdjustments(target) {
+  const charAdjustments = BASE_ADJUSTMENT_FACTORS.map(([key, fn]) => [key, fn(target)]);
   const propertyAdjustments = charAdjustments.map(([, adj]) => adj);
+  const charAdj = propertyAdjustments.reduce((product, adj) => product * adj.factor, 1);
 
-  const charAdj = charAdjustments.reduce((product, [, adj]) => product * adj.factor, 1);
-  const contextAdjRaw = rawContextAdjustments.reduce((product, adj) => product * adj.factor, 1);
-  const contextAdj = clamp(contextAdjRaw, 0.85, 1.15);
-
-  const contextAdjustments = rawContextAdjustments.map(adj => adj);
-  return {
-    floorAdj,
-    orientAdj,
-    amenitAdj,
-    dpeAdj,
-    conditionAdj,
-    ageAdj,
-    viewAdj,
-    poolAdj,
-    gardenAdj,
-    duplexAdj,
-    charAdj,
-    contextAdj,
-    propertyAdjustments,
-    contextAdjustments,
-    areaScores,
-  };
+  return { charAdjustments, propertyAdjustments, charAdj };
 }
 
-function buildAdjustmentRows(adjustments) {
-  return [
-    adjustments.floorAdj,
-    adjustments.orientAdj,
-    adjustments.amenitAdj,
-    adjustments.dpeAdj,
-    adjustments.conditionAdj,
-    adjustments.ageAdj,
-    adjustments.viewAdj,
-    adjustments.poolAdj,
-    adjustments.gardenAdj,
-    adjustments.duplexAdj,
-    ...adjustments.contextAdjustments,
-  ].filter(adj => adj.label && Math.abs(adj.factor - 1) > 0.0001);
+/**
+ * Pondérations calculées automatiquement à partir des caractéristiques du
+ * bien (DPE, étage, orientation, extérieurs, parking, vue) — affichées et
+ * modifiables dans l'onglet Analyste comme point de départ.
+ */
+export function buildBaseAnalystAdjustments(target) {
+  return buildAdjustments(target).charAdjustments
+    .filter(([, adj]) => adj.label && Math.abs(adj.factor - 1) > 0.0001)
+    .map(([key, adj]) => ({
+      id: `base_${key}`,
+      key,
+      pct: Math.round((adj.factor - 1) * 1000) / 10,
+      label: adj.label,
+      base: true,
+    }));
 }
 
 function computeGeoSpreadMeters(comps, location) {
@@ -598,10 +480,19 @@ function computeEstimateConfidence(comps, location) {
   };
 }
 
-function computeEstimateCore(comps, target, correctionFactor = 1, areaContext = null, location = null) {
+/**
+ * Estimation "marché" rapide : base marché (fournie par l'appelant — la même
+ * moyenne pondérée que l'onglet Analyste, pour ne jamais afficher deux bases
+ * différentes) × pondérations du bien. Sert d'aperçu sur les cartes du
+ * portefeuille et de repère dans la synthèse — ce n'est pas "le" chiffre
+ * retenu, qui reste celui que l'analyste valide dans son onglet.
+ * Si aucune base n'est fournie, on retombe sur la médiane pondérée des
+ * comparables (utile hors contexte Analyste, ex. carte du portefeuille).
+ */
+function computeEstimateCore(comps, target, location = null, basePm2Override = null) {
   if (!comps.length) return null;
 
-  const basePm2 = weightedMedian(comps.map(comp => ({ value: comp.pm2, weight: comp.weight })));
+  const basePm2 = basePm2Override ?? weightedMedian(comps.map(comp => ({ value: comp.pm2, weight: comp.weight })));
   if (!basePm2) return null;
 
   const surf = target?.surfaceM2;
@@ -609,59 +500,38 @@ function computeEstimateCore(comps, target, correctionFactor = 1, areaContext = 
     ? Math.max(0.8, 1 - 0.0015 * Math.max(0, surf - 50))
     : 1;
 
-  const adjustments = buildAdjustments(target, areaContext);
+  const adjustments = buildAdjustments(target);
   const afterSurfPm2 = basePm2 * surfAdj;
-  const afterCharPm2 = afterSurfPm2 * adjustments.charAdj;
-  // contextAdj (quartier) kept for display/info only — not applied to the price
-  const afterContextPm2 = afterCharPm2 * adjustments.contextAdj;
-  const correctedPm2 = afterCharPm2 * correctionFactor;
+  const estimatedPm2 = afterSurfPm2 * adjustments.charAdj;
 
   const { std } = weightedStats(comps.map(comp => ({ value: comp.pm2, weight: comp.weight })));
   const halfWidth =
-    comps.length === 1 ? correctedPm2 * 0.25 :
-    comps.length < 3 ? correctedPm2 * 0.2 :
-    std * correctionFactor * 1.5;
+    comps.length === 1 ? estimatedPm2 * 0.25 :
+    comps.length < 3 ? estimatedPm2 * 0.2 :
+    std * 1.5;
 
-  const minPm2 = Math.max(correctedPm2 * 0.6, correctedPm2 - halfWidth);
-  const maxPm2 = correctedPm2 + halfWidth;
+  const minPm2 = Math.max(estimatedPm2 * 0.6, estimatedPm2 - halfWidth);
+  const maxPm2 = estimatedPm2 + halfWidth;
   const confidence = computeEstimateConfidence(comps, location);
 
   return {
     basePm2: Math.round(basePm2),
     afterSurfPm2: Math.round(afterSurfPm2),
-    afterCharPm2: Math.round(afterCharPm2),
-    afterContextPm2: Math.round(afterContextPm2),
-    adjustedPm2: Math.round(afterContextPm2),
-    correctedPm2: Math.round(correctedPm2),
+    estimatedPm2: Math.round(estimatedPm2),
     minPm2: Math.round(minPm2),
     maxPm2: Math.round(maxPm2),
-    estimatedPrice: surf ? round1k(correctedPm2 * surf) : null,
+    estimatedPrice: surf ? round1k(estimatedPm2 * surf) : null,
     minPrice: surf ? round1k(minPm2 * surf) : null,
     maxPrice: surf ? round1k(maxPm2 * surf) : null,
     nComps: comps.length,
-    correctionFactor,
     surfAdj: roundFactor(surfAdj),
-    floorAdj: adjustments.floorAdj,
-    orientAdj: adjustments.orientAdj,
-    amenitAdj: adjustments.amenitAdj,
-    dpeAdj: adjustments.dpeAdj,
-    conditionAdj: adjustments.conditionAdj,
-    ageAdj: adjustments.ageAdj,
-    viewAdj: adjustments.viewAdj,
-    poolAdj: adjustments.poolAdj,
-    gardenAdj: adjustments.gardenAdj,
-    duplexAdj: adjustments.duplexAdj,
     charAdj: roundFactor(adjustments.charAdj),
-    contextAdj: roundFactor(adjustments.contextAdj),
     propertyAdjustments: adjustments.propertyAdjustments,
-    contextAdjustments: adjustments.contextAdjustments,
-    adjustments: buildAdjustmentRows(adjustments),
-    areaScores: adjustments.areaScores,
     confidence,
   };
 }
 
-export function computeEstimate(features, selectedIndices, target, correctionFactor = 1, areaContext = null, location = null) {
+export function computeEstimate(features, selectedIndices, target, location = null, basePm2Override = null) {
   const indices = selectedIndices.length > 0 ? selectedIndices : features.map((_, index) => index);
   const now = Date.now();
 
@@ -686,10 +556,10 @@ export function computeEstimate(features, selectedIndices, target, correctionFac
     })
     .filter(comp => comp && Number.isFinite(comp.pm2) && comp.pm2 > 0);
 
-  return computeEstimateCore(comps, target, correctionFactor, areaContext, location);
+  return computeEstimateCore(comps, target, location, basePm2Override);
 }
 
-export function computeEstimateFromRefs(filteredRefs, target, correctionFactor = 1, areaContext = null, location = null) {
+export function computeEstimateFromRefs(filteredRefs, target, location = null, basePm2Override = null) {
   const now = Date.now();
 
   const comps = filteredRefs
@@ -708,73 +578,5 @@ export function computeEstimateFromRefs(filteredRefs, target, correctionFactor =
       };
     });
 
-  return computeEstimateCore(comps, target, correctionFactor, areaContext, location);
-}
-
-export function computeCorrectionFactor(samples) {
-  if (!samples.length) return 1;
-  const recent = samples.slice(-20);
-  const logSum = recent.reduce((sum, sample) => sum + Math.log(sample.ratio), 0);
-  const factor = Math.exp(logSum / recent.length);
-  return Math.max(0.5, Math.min(2, factor));
-}
-
-export function addConfirmation(samples, { basePm2, actualPrice, surfaceM2, dossierId, address }) {
-  const actualPm2 = actualPrice / surfaceM2;
-  const ratio = actualPm2 / basePm2;
-  const isOutlier = ratio < 0.3 || ratio > 3;
-
-  const sample = {
-    dossierId,
-    address,
-    basePm2: Math.round(basePm2),
-    actualPm2: Math.round(actualPm2),
-    actualPrice,
-    surfaceM2,
-    ratio,
-    isOutlier,
-    confirmedAt: new Date().toISOString(),
-  };
-
-  const updated = [...samples, sample].slice(-100);
-  const validSamples = updated.filter(entry => !entry.isOutlier);
-  const factor = computeCorrectionFactor(validSamples);
-
-  const mae = validSamples.length
-    ? Math.round(
-        validSamples.reduce((sum, entry) => sum + Math.abs(entry.actualPm2 - entry.basePm2 * factor), 0) / validSamples.length
-      )
-    : null;
-
-  const mape = validSamples.length
-    ? Math.round(
-        validSamples.reduce(
-          (sum, entry) => sum + Math.abs(entry.actualPm2 / (entry.basePm2 * factor) - 1) * 100,
-          0
-        ) / validSamples.length
-      )
-    : null;
-
-  return { samples: updated, correctionFactor: factor, mae, mape, isOutlier };
-}
-
-export function modelStats(samples, correctionFactor) {
-  const valid = samples.filter(sample => !sample.isOutlier);
-  if (!valid.length) return null;
-
-  const mae = Math.round(
-    valid.reduce((sum, sample) => sum + Math.abs(sample.actualPm2 - sample.basePm2 * correctionFactor), 0) / valid.length
-  );
-  const mape = Math.round(
-    valid.reduce((sum, sample) => sum + Math.abs(sample.actualPm2 / (sample.basePm2 * correctionFactor) - 1) * 100, 0) / valid.length
-  );
-  const biasPct = Math.round((correctionFactor - 1) * 100);
-
-  return {
-    n: valid.length,
-    mae,
-    mape,
-    biasPct,
-    correctionFactor: roundFactor(correctionFactor),
-  };
+  return computeEstimateCore(comps, target, location, basePm2Override);
 }

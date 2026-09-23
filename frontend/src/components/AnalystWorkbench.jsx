@@ -16,8 +16,8 @@ function adjustmentLabel(key) {
   return ANALYST_ADJUSTMENT_OPTIONS.find(option => option.value === key)?.label || 'Autre';
 }
 
-function computeAnalystPm2(basePm2, adjustments) {
-  if (!Number.isFinite(basePm2) || basePm2 <= 0) return null;
+function applyPct(basePm2, adjustments) {
+  if (!Number.isFinite(basePm2) || basePm2 <= 0) return basePm2;
   const factor = adjustments.reduce((product, item) => product * (1 + (Number(item.pct) || 0) / 100), 1);
   return Math.round(basePm2 * factor);
 }
@@ -31,6 +31,7 @@ export default function AnalystWorkbench({
   metrics,
   areaScores,
   target,
+  baseAdjustments = [],
   analystBasePm2,
   analystAdjustments,
   manualEstimate,
@@ -43,7 +44,9 @@ export default function AnalystWorkbench({
 }) {
   const [showEditor, setShowEditor] = useState(false);
   const basePm2 = analystBasePm2 ?? metrics?.avgWeighted ?? metrics?.avg ?? null;
-  const computedPm2 = computeAnalystPm2(basePm2, analystAdjustments);
+  // Base marché → pondérations du bien (auto, lecture seule) → pondérations analyste (manuelles).
+  const afterBasePm2 = applyPct(basePm2, baseAdjustments);
+  const computedPm2 = applyPct(afterBasePm2, analystAdjustments);
   const displayedPm2 = computedPm2 ?? manualEstimate;
   const displayedPrice = computePrice(displayedPm2, target?.surfaceM2);
   const savedPrice = computePrice(manualEstimate, target?.surfaceM2);
@@ -92,6 +95,33 @@ export default function AnalystWorkbench({
               <div className="awb-mini-score"><span>Env.</span><strong>{areaScores.environmentScore}/100</strong></div>
             )}
           </div>
+          <small className="efp-hint">Scores de quartier indicatifs — voir l'onglet Quartier. Ils n'influencent pas le prix.</small>
+        </section>
+
+        <section className="awb-card">
+          <div className="awb-card-head">
+            <div>
+              <h3>Pondérations de base</h3>
+              <p>Calculées automatiquement depuis les infos du bien saisies au départ.</p>
+            </div>
+          </div>
+          <div className="awb-adjustment-list">
+            {baseAdjustments.length === 0 && (
+              <div className="awb-empty">Aucune caractéristique renseignée pour le moment.</div>
+            )}
+            {baseAdjustments.map(item => (
+              <div key={item.id} className="awb-breakdown-row">
+                <span>{item.label}</span>
+                <strong>{item.pct > 0 ? '+' : ''}{item.pct}%</strong>
+              </div>
+            ))}
+          </div>
+          {baseAdjustments.length > 0 && (
+            <div className="awb-base-stat" style={{ marginTop: 10 }}>
+              <span>Base + pondérations du bien</span>
+              <strong>{fmtPm2(afterBasePm2)}</strong>
+            </div>
+          )}
         </section>
 
         <section className="awb-card">
@@ -185,6 +215,12 @@ export default function AnalystWorkbench({
               <span>Base marché</span>
               <strong>{fmtPm2(basePm2)}</strong>
             </div>
+            {baseAdjustments.map(item => (
+              <div key={item.id} className="awb-breakdown-row">
+                <span>{item.label}</span>
+                <strong>{item.pct > 0 ? '+' : ''}{item.pct}%</strong>
+              </div>
+            ))}
             {(analystAdjustments || []).map(item => (
               <div key={item.id} className="awb-breakdown-row">
                 <span>{adjustmentLabel(item.key)}</span>
